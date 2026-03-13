@@ -22,7 +22,9 @@ try {
     & $libInst\updatePsHelp_prefs.ps1 $it
     & $libInst\vscode_prefs.ps1          $it
     & $libInst\procmonSettings_prefs.ps1 $it
-    & $libInst\googleChrome_prefs.ps1    $it
+    & $libInst\googleChrome_prefs.ps1          $it
+    # TODO: autoHotKey_prefs.ps1 goes here (Phase 2b) — must precede windowsCustomizations (taskpane icons step references AHK)
+    & $libInst\windowsCustomizations_prefs.ps1 $it
 
 } catch {
     if ($null -ne $it) { $it.ReportErrorContext($error[0]) }
