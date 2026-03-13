@@ -16,9 +16,11 @@ $it = $null
 try {
     $it = Start-Installation "prefs" -InstallationDatabaseLocation "$home\prat\auto\instDb" -Force:$Force
 
-    Write-Host "deploy_prefs: running"  # TODO: remove
     $libInst = "$home\prefs\lib\inst"
-    & $libInst\keyboard_prefs.ps1 $it
+    & $libInst\keyboard_prefs.ps1     $it
+    & $libInst\mouse_prefs.ps1        $it
+    & $libInst\updatePsHelp_prefs.ps1 $it
+    & $libInst\vscode_prefs.ps1       $it
 
 } catch {
     if ($null -ne $it) { $it.ReportErrorContext($error[0]) }
