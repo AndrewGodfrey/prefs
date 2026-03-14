@@ -17,6 +17,7 @@ try {
     $it = Start-Installation "prefs" -InstallationDatabaseLocation "$home\prat\auto\instDb" -Force:$Force
 
     $libInst = "$home\prefs\lib\inst"
+    & $libInst\schTasks_prefs.ps1              $it $Suppress
     & $libInst\keyboard_prefs.ps1     $it
     & $libInst\mouse_prefs.ps1        $it
     & $libInst\updatePsHelp_prefs.ps1 $it
