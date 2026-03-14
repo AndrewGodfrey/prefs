@@ -8,7 +8,7 @@
 using module ..\..\prat\lib\TextFileEditor\TextFileEditor.psd1
 using module ..\..\prat\lib\Installers\Installers.psd1
 
-param ([switch] $Force)
+param ([switch] $Force, [string[]] $Suppress = @())
 $ErrorActionPreference = "Stop"
 
 $it = $null
@@ -23,7 +23,7 @@ try {
     & $libInst\vscode_prefs.ps1          $it
     & $libInst\procmonSettings_prefs.ps1 $it
     & $libInst\googleChrome_prefs.ps1          $it
-    # TODO: autoHotKey_prefs.ps1 goes here (Phase 2b) — must precede windowsCustomizations (taskpane icons step references AHK)
+    & $libInst\autoHotKey_prefs.ps1 $it $Suppress  # must precede windowsCustomizations (taskpane icons step references AHK)
     & $libInst\windowsCustomizations_prefs.ps1 $it
 
 } catch {
