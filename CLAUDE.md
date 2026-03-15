@@ -21,7 +21,7 @@ This depends on:
 ```powershell
 curl.exe -L -o $env:temp\Install-Prefs.ps1 https://github.com/AndrewGodfrey/prefs/raw/main/lib/inst/Install-Prefs.ps1
 . $env:temp\Install-Prefs.ps1
-~/prefs/lib/deploy_prefs.ps1
+pwsh -File ~/prefs/lib/deploy_prefs.ps1
 ```
 
 ## Dev environment chain
