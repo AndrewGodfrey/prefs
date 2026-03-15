@@ -19,8 +19,8 @@ This depends on:
 ## Standalone bootstrap (cafe/VM)
 
 ```powershell
-git clone https://github.com/AndrewGodfrey/prefs.git $home/prefs
-~/prefs/lib/inst/Install-Prefs.ps1
+curl.exe -L -o $env:temp\Install-Prefs.ps1 https://github.com/AndrewGodfrey/prefs/raw/main/lib/inst/Install-Prefs.ps1
+. $env:temp\Install-Prefs.ps1
 ~/prefs/lib/deploy_prefs.ps1
 ```
 

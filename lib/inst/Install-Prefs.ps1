@@ -1,7 +1,7 @@
 #Requires -PSEdition Core, Desktop
 
 # Bootstrap script for the prefs repo.
-# Installs prat (from GitHub) if not already present.
+# Installs prat (from GitHub) if not already present, then self-clones prefs if not already present.
 param ([switch] $Force, [switch] $InteractiveUser = $true)
 $ErrorActionPreference = "Stop"
 
@@ -11,4 +11,9 @@ if (!(Test-Path "$home/prat")) {
     if ($lastExitCode -ne 0) { throw "curl.exe failed: $lastExitCode" }
 
     . $env:temp\Install-Prat.ps1 -Force:$Force -InteractiveUser:$InteractiveUser
+}
+
+if (!(Test-Path "$home/prefs")) {
+    Write-Host -ForegroundColor Green "Install-Prefs.ps1: Clone prefs"
+    git clone https://github.com/AndrewGodfrey/prefs.git $home/prefs
 }
