@@ -30,6 +30,8 @@ Here's a best-effort list of extensions and settings I set up ... which are now 
       $home\AppData\Local\programs\AutoHotkey\v2\AutoHotkey64.exe
     - Note: I was previously using "mark-wiemer.vscode-autohotkey-plus-plus". But it's winding down.
   - ms-vscode.hexeditor
+  - ivoh.openfileatcursor
+    - trying default bindings - Alt-D and Ctrl-Shift-Alt-D
   - Pester Tests (Pester)
   - PowerShell (Microsoft)
   - R.paste-markdown
