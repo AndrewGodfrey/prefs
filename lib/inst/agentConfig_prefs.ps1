@@ -14,7 +14,7 @@ Install-Folder $stage "$home\.claude"
 if ('installHomeClaudeMd' -notin $Suppress) {
     # Standalone mode (no de): assemble $home/.claude/CLAUDE.md from prat base + prefs fragment.
     # When de is running, it suppresses this and assembles with both prefs and de fragments.
-    Install-ClaudeUserConfig $stage "$home\prefs\lib\agents\agent-user.md"
+    Install-ClaudeUserConfig $stage "$home\prefs\lib\agents\agent-user_prefs.md"
 }
 
 # Global skills, agents, and commands from prat.
