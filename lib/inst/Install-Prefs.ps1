@@ -1,17 +1,8 @@
 #Requires -PSEdition Core, Desktop
 
-# Bootstrap script for the prefs repo.
+# Bootstrap script for the prefs repo (cafe/VM standalone use).
 # Installs prat (from GitHub) if not already present.
 param ([switch] $Force, [switch] $InteractiveUser = $true)
 $ErrorActionPreference = "Stop"
 
-function STEP($msg) { Write-Host -ForegroundColor Green "Install-Prefs.ps1: $msg" }
-
-if (!(Test-Path "$home/prat")) {
-    STEP "Install Prat"
-    curl.exe -L -o $env:temp\Install-Prat.ps1 https://github.com/AndrewGodfrey/prat/raw/main/lib/Install-Prat.ps1
-    if ($lastExitCode -ne 0) { throw "curl.exe failed: $lastExitCode" }
-
-    . $env:temp\Install-Prat.ps1 -Force:$Force -InteractiveUser:$InteractiveUser
-}
-
+&$PSScriptRoot\Install-Prat.ps1 -Force:$Force -InteractiveUser:$InteractiveUser
