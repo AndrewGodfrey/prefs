@@ -4,7 +4,7 @@ Install-PratPackage $installationTracker "autohotkey"
 
 $stage = $installationTracker.StartStage('autohotkey')
 Install-UserEnvironmentVariable $stage 'ahk_launch_myEditor' 'VsCode'
-if ('autohotkey-launch' -notin $Suppress) {
+if ('launchAutohotkey' -notin $Suppress) {
     Install-StartAutoHotKeyScript $stage "$home\prefs\lib\Hotkey-LaunchSomething.ahk"
 }
 

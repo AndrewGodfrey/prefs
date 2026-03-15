@@ -1,6 +1,14 @@
-# prefs
+# `prefs` - Andrew's preferences
 
-Andrew's personal preferences — used on all machines.
+Public open-source. 
+Andrew-specific preferences, excluding sensitive and secret information. 
+Usable from vm/cafe machines and from personal/work versions of his `de` repo.
+
+This depends on:
+- `$home\prat`:  Public open-source. Usable by anyone. See also: @CLAUDE_prat.md
+
+- When a change logically belongs in `prat`, make it there instead of in this repo.
+
 
 ## Repo structure
 
