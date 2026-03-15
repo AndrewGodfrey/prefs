@@ -22,4 +22,6 @@ Install-ClaudeSkillSet $stage @("testing", "working-with-git") "$home\prat\lib\a
 Install-ClaudeMarkdownFiles $stage "$home\prat\lib\agents\subagents" "$home/.claude/agents"
 Install-ClaudeMarkdownFiles $stage "$home\prat\lib\agents\commands" "$home/.claude/commands"
 
+Install-ClaudeUserSettings $stage
+
 $installationTracker.EndStage($stage)
