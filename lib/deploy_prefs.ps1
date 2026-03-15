@@ -17,6 +17,7 @@ try {
     $it = Start-Installation "prefs" -InstallationDatabaseLocation "$home\prat\auto\instDb" -Force:$Force
 
     $libInst = "$home\prefs\lib\inst"
+    & $libInst\packages_prefs.ps1              $it  # install packages first; agentConfig etc. depend on claude being present
     & $libInst\agentConfig_prefs.ps1           $it $Suppress
     & $libInst\schTasks_prefs.ps1              $it $Suppress
     & $libInst\keyboard_prefs.ps1     $it
