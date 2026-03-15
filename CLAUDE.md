@@ -13,7 +13,7 @@ This depends on:
 ## Repo structure
 
 - `pathbin/` — scripts on PATH; `Get-DevEnvironments.ps1` chains prefs into prat's overlay mechanism
-- `lib/inst/` — bootstrap: `Install-Prefs.ps1`, `Install-PrefsPhase2.ps1`
+- `lib/inst/` — bootstrap: `Install-Prefs.ps1`
 - `lib/` — `deploy_prefs.ps1` (main deploy entry point)
 
 ## Standalone bootstrap (cafe/VM)
