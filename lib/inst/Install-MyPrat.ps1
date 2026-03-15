@@ -1,11 +1,14 @@
 #Requires -PSEdition Core, Desktop
 
-# Bootstrap script for the prefs repo.
-# Installs prat (from GitHub) if not already present.
+# Installs Prat (customized for me).
+# Ideally, this includes all settings I want in all dev environments.
+#   (But, it can't install things that depend on the dev environment e.g. overridden files found via Resolve-PratLibFile.ps1)
+# It should exclude things that are specific to one of my dev environments (that is: test machine; personal; work/whatever)
+#
 param ([switch] $Force, [switch] $InteractiveUser = $true)
 $ErrorActionPreference = "Stop"
 
-function STEP($msg) { Write-Host -ForegroundColor Green "Install-Prefs.ps1: $msg" }
+function STEP($msg) { Write-Host -ForegroundColor Green "Install-MyPrat.ps1: $msg" }
 
 if (!(Test-Path "$home/prat")) {
     STEP "Install Prat"
@@ -14,4 +17,3 @@ if (!(Test-Path "$home/prat")) {
 
     . $env:temp\Install-Prat.ps1 -Force:$Force -InteractiveUser:$InteractiveUser
 }
-
