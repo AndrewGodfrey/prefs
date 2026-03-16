@@ -35,6 +35,11 @@ $safeDirs = (@("$home/prefs", "$home/prat") + $extraSafeDirs) | ForEach-Object {
 $text += "[safe]`n"
 $text += ($safeDirs | ForEach-Object { "    directory = $_`n" }) -join ""
 
+$extraGitConfig = $Config['extraGitConfig']
+if ($extraGitConfig) {
+    $text += "`n$extraGitConfig"
+}
+
 Install-TextToFile $stage "$home\.gitconfig" $text -Backup
 
 $installationTracker.EndStage($stage)
