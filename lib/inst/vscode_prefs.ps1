@@ -1,7 +1,8 @@
 param($installationTracker)
 $stage = $installationTracker.StartStage('vscode')
 
-Install-WingetPackage $stage "Microsoft.VisualStudioCode" "$env:localappdata\Programs\Microsoft VS Code"
+Install-WingetPackage $stage "Microsoft.VisualStudioCode" "$env:localappdata\Programs\Microsoft VS Code" `
+    -AlternatePaths @("C:\Program Files\Microsoft VS Code")
 
 $stage.EnsureManualStep("vscode\signin", @"
 Sync settings:
