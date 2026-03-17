@@ -14,19 +14,26 @@ function main($installationTracker) {
     $installationTracker.EndStage($stage)
 }
 
+function isWin11 {
+    $osVersion = [System.Environment]::OSVersion.Version
+    return ($osVersion.Major -eq 10 -and $osVersion.Build -ge 22000) -or ($osVersion.Major -gt 10)
+}
+
 function installShellCustomization($stage) {
     Install-WindowsStartMenuLocalOnly $stage
     Install-WindowsSecondaryClockUTC $stage
     Install-WindowsTaskbarCleanup $stage
 
-    # Disable keyboard shortcuts I trigger by accident:
-    $stage.EnsureManualStep("windows\textShortcuts", @"
+    if (!(isWin11)) {
+        # Disable keyboard shortcuts I trigger by accident:
+        $stage.EnsureManualStep("windows\textShortcuts", @"
 
 - Win + I (i.e. Settings) > Time & Language > Language > Keyboard > Input language hot keys
   This should open the "Text Services and Input Languages" dialog.
 - Change Key Sequence > choose "Not Assigned" for both.
 - Language Bar > select "Hidden".
 "@)
+    }
 
     $stage.EnsureManualStep("taskbar\taskpaneIcons", @"
   - Right-click taskbar
