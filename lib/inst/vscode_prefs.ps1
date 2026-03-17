@@ -1,10 +1,10 @@
-param($installationTracker)
+param($installationTracker, [string[]] $Suppress = @())
 $stage = $installationTracker.StartStage('vscode')
 
 Install-WingetPackage $stage "Microsoft.VisualStudioCode" "$env:localappdata\Programs\Microsoft VS Code" `
     -AlternatePaths @("C:\Program Files\Microsoft VS Code")
 
-$stage.EnsureManualStep("vscode\signin", @"
+if ("vscodeSignin" -notin $Suppress) { $stage.EnsureManualStep("vscode\signin", @"
 Sync settings:
 - Check on an existing machine that settings sync is on. It seems to turn itself off.
 - Launch vscode ("code" or Start Menu)
@@ -13,7 +13,7 @@ Sync settings:
 - Click "Sign in". Sign in using github.
 - Now... wait. It will slowly sync settings and install extensions. It will prompt to reload the window sometimes.
 - It seems like maybe if I close and reopen the app, it loads more installed extensions than it did before.
-"@)
+"@) }
 
 <#
 Here's a best-effort list of extensions and settings I set up ... which are now synced...

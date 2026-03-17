@@ -23,7 +23,7 @@ try {
     & $libInst\keyboard_prefs.ps1     $it
     & $libInst\mouse_prefs.ps1        $it
     & $libInst\updatePsHelp_prefs.ps1 $it
-    & $libInst\vscode_prefs.ps1          $it
+    & $libInst\vscode_prefs.ps1          $it $Suppress
     & $libInst\procmonSettings_prefs.ps1 $it
     & $libInst\gitconfig_prefs.ps1             $it $Config
     & $libInst\googleChrome_prefs.ps1          $it $Suppress
