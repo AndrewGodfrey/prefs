@@ -8,7 +8,7 @@
 using module ..\..\prat\lib\TextFileEditor\TextFileEditor.psd1
 using module ..\..\prat\lib\Installers\Installers.psd1
 
-param ([switch] $Force, [string[]] $Suppress = @(), [hashtable] $Config = @{})
+param ([switch] $Force, [string[]] $Suppress = @(), [string[]] $Enable = @(), [hashtable] $Config = @{})
 $ErrorActionPreference = "Stop"
 
 $it = $null
@@ -18,7 +18,7 @@ try {
 
     $libInst = "$home\prefs\lib\inst"
     & $libInst\packages_prefs.ps1              $it $Suppress  # install packages first; agentConfig etc. depend on claude being present
-    & $libInst\agentConfig_prefs.ps1           $it $Suppress
+    & $libInst\agentConfig_prefs.ps1           $it $Suppress $Enable $Config
     & $libInst\schTasks_prefs.ps1              $it $Suppress
     & $libInst\keyboard_prefs.ps1     $it
     & $libInst\mouse_prefs.ps1        $it

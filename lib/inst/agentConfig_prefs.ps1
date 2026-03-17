@@ -1,4 +1,4 @@
-param($installationTracker, [string[]] $Suppress = @())
+param($installationTracker, [string[]] $Suppress = @(), [string[]] $Enable = @(), [hashtable] $Config = @{})
 
 $stage = $installationTracker.StartStage('agentConfig')
 
@@ -23,5 +23,20 @@ Install-ClaudeMarkdownFiles $stage "$home\prat\lib\agents\subagents" "$home/.cla
 Install-ClaudeMarkdownFiles $stage "$home\prat\lib\agents\commands" "$home/.claude/commands"
 
 Install-ClaudeUserSettings $stage
+
+if ('installClaudeSyncFolders' -in $Enable -and $Config.syncFoldersPath) {
+    Install-ClaudeSyncFolders $stage $Config.syncFoldersPath
+}
+
+if ('installClaudeProjectMemory' -in $Enable) {
+    Install-ClaudeProjectMemory $stage
+}
+
+if ($Config.deRepoRoot) {
+    $prefsClaudeMd = Import-TextFile "$home\prefs\CLAUDE.md"
+    Install-TextToFile $stage "$($Config.deRepoRoot)\CLAUDE_prefs.md" $prefsClaudeMd
+    $pratClaudeMd = Import-TextFile "$home\prat\CLAUDE.md"
+    Install-TextToFile $stage "$($Config.deRepoRoot)\CLAUDE_prat.md" $pratClaudeMd
+}
 
 $installationTracker.EndStage($stage)
