@@ -26,7 +26,7 @@ try {
     & $libInst\vscode_prefs.ps1          $it
     & $libInst\procmonSettings_prefs.ps1 $it
     & $libInst\gitconfig_prefs.ps1             $it $Config
-    & $libInst\googleChrome_prefs.ps1          $it
+    & $libInst\googleChrome_prefs.ps1          $it $Suppress
     & $libInst\autoHotKey_prefs.ps1 $it $Suppress  # must precede windowsCustomizations (taskpane icons step references AHK)
     & $libInst\windowsCustomizations_prefs.ps1 $it
 
