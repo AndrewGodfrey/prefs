@@ -28,4 +28,9 @@ return @{
             "Bash(t:*)"
         )
     }
+    hooks = @{
+        Stop = @(
+            @{hooks = @(@{type = "command"; command = 'pwsh -c ''& "$home/prat/lib/On-AgentTurnCompleted.ps1"'''})}
+        )
+    }
 }
