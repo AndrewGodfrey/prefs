@@ -6,7 +6,6 @@ $claudePath = $homeFwd -replace '^C:', '//c'
 return @{
     spinnerVerbs       = @{mode = "replace"; verbs = @("Working")}
     spinnerTipsEnabled = $false
-    enabledPlugins     = @{"superpowers@claude-plugins-official" = $false}
     ui                 = @{showStartupTips = $false}
     attribution        = @{commits = $false; pullRequests = $false}
     additionalDirectories = @("$homeFwd/prat", "$homeFwd/prefs")
