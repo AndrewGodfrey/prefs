@@ -5,11 +5,11 @@
 #
 # Deployment for Andrew's personal preferences (prefs repo).
 # Can be run standalone (cafe/VM) or called by deploy_de.ps1.
-using module ..\..\prat\lib\TextFileEditor\TextFileEditor.psd1
-using module ..\..\prat\lib\Installers\Installers.psd1
-
 param ([switch] $Force, [string[]] $Suppress = @(), [string[]] $Enable = @(), [hashtable] $Config = @{})
 $ErrorActionPreference = "Stop"
+
+Import-Module "$home\prat\lib\TextFileEditor\TextFileEditor.psd1"
+Import-Module "$home\prat\lib\Installers\Installers.psd1"
 
 $it = $null
 
