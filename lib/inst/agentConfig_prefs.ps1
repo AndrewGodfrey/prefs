@@ -18,7 +18,7 @@ if ('installHomeClaudeMd' -notin $Suppress) {
 }
 
 # Global skills, agents, and commands from prat.
-Install-ClaudeSkillSet $stage @("testing", "working-with-git", "remember") "$home\prat\lib\agents\skills" "$home/.claude/skills"
+Install-ClaudeSkillSet $stage @("testing", "working-with-git", "remember", "plan-format") "$home\prat\lib\agents\skills" "$home/.claude/skills"
 Install-ClaudeMarkdownFiles $stage "$home\prat\lib\agents\subagents" "$home/.claude/agents"
 Install-ClaudeMarkdownFiles $stage "$home\prat\lib\agents\commands" "$home/.claude/commands"
 
