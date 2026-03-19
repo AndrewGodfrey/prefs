@@ -4,6 +4,7 @@
         repos = @{
             prefs = @{
                 root   = $PSScriptRoot
+                test   = "$home/prat/lib/Test-PratCodebase.ps1"
                 deploy = {
                     param($project, [hashtable]$CommandParameters = @{})
                     $force = [bool]($CommandParameters['Force'])
