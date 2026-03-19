@@ -18,6 +18,7 @@ try {
 
     $libInst = "$home\prefs\lib\inst"
     & $libInst\packages_prefs.ps1              $it $Suppress  # install packages first; agentConfig etc. depend on claude being present
+    & $libInst\powerToys_prefs.ps1             $it
     & $libInst\agentConfig_prefs.ps1           $it $Suppress $Enable $Config
     & $libInst\schTasks_prefs.ps1              $it $Suppress
     & $libInst\keyboard_prefs.ps1     $it

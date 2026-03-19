@@ -1,6 +1,6 @@
 param($installationTracker, [string[]] $Suppress = @())
 
-foreach ($packageId in @("pwsh", "wget", "df", "ditto", "sysinternals", "claude", "python", "nuget")) {
+foreach ($packageId in @("pwsh", "wget", "df", "ditto", "sysinternals", "claude", "python", "nuget", "powertoys")) {
     if ("pkg/$packageId" -notin $Suppress) {
         Install-PratPackage $installationTracker $packageId
     }
