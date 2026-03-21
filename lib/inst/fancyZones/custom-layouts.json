@@ -1,0 +1,52 @@
+{
+  "custom-layouts": [
+    {
+      "uuid": "{72207334-72A3-4AB6-83FE-01FEE336F1FA}",
+      "name": "fullscreen",
+      "type": "canvas",
+      "info": {
+        "ref-width": 2560,
+        "ref-height": 1440,
+        "zones": [
+          {
+            "X": 0,
+            "Y": 0,
+            "width": 2560,
+            "height": 1400
+          }
+        ],
+        "sensitivity-radius": 20
+      }
+    },
+    {
+      "uuid": "{C00E7BB8-D784-447F-8C0E-B00E3564C6D3}",
+      "name": "agent",
+      "type": "canvas",
+      "info": {
+        "ref-width": 2560,
+        "ref-height": 1440,
+        "zones": [
+          {
+            "X": 0,
+            "Y": 0,
+            "width": 1095,
+            "height": 1400
+          },
+          {
+            "X": 1169,
+            "Y": 16,
+            "width": 1063,
+            "height": 610
+          },
+          {
+            "X": 1095,
+            "Y": 416,
+            "width": 1462,
+            "height": 984
+          }
+        ],
+        "sensitivity-radius": 20
+      }
+    }
+  ]
+}
