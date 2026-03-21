@@ -89,6 +89,13 @@ Describe "customizeTerminal" {
         $el['hidden']     | Should -Be $false
     }
 
+    It "puts PowerShell (Elevated) at position 0 and PowerShell at position 1" {
+        $result = customizeTerminal $script:baseJson $script:filename "#1F2233"
+        $list = (ConvertFrom-Json $result -AsHashtable).profiles.list
+        $list[0]['guid'] | Should -Be (getGuid_PsProfile)
+        $list[1]['guid'] | Should -Be (getGuid_PsElevatedProfile)
+    }
+
     It "is idempotent: running twice produces the same result" {
         $result1 = customizeTerminal $script:baseJson $script:filename "#1F2233"
         $result2 = customizeTerminal $result1 $script:filename "#1F2233"

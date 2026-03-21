@@ -72,6 +72,9 @@ function customizeTerminal([string] $content, [string] $filename, [string] $bgCo
     $content = Update-JsonSection $content @("profiles", "list", "[@guid='$(getGuid_PsProfile)']")        (buildPsProfileSection $bgColor) $filename
     $content = Update-JsonSection $content @("profiles", "list", "[@guid='$(getGuid_PsElevatedProfile)']") (buildElevatedProfileSection)    $filename
 
+    $content = Move-JsonArrayElementToFirst $content @("profiles", "list", "[@guid='$(getGuid_PsElevatedProfile)']") $filename
+    $content = Move-JsonArrayElementToFirst $content @("profiles", "list", "[@guid='$(getGuid_PsProfile)']")        $filename
+
     return $content
 }
 
