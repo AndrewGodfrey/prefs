@@ -1,9 +1,17 @@
 param($installationTracker)
 
-function Set-PowerToysEnabledModules([hashtable] $enabled, [string[]] $keepEnabled) {
-    foreach ($key in @($enabled.Keys)) {
-        $enabled[$key] = $key -in $keepEnabled
+function Set-PowerToysEnabledModules([string] $content, [string[]] $keepEnabled, [string] $filename) {
+    $json = ConvertFrom-Json $content -AsHashtable
+    foreach ($key in @($json.enabled.Keys)) {
+        $range = Find-JsonSection $content @("enabled", $key) $filename
+        if ($null -ne $range) {
+            $line = ((ConvertTo-UnixLineEndings $content) -split "`n")[$range.idxFirst]
+            $newBool = if ($key -in $keepEnabled) { 'true' } else { 'false' }
+            $newLine = $line -replace '\b(true|false)\b', $newBool
+            $content = Format-ReplaceLines $content $range $newLine
+        }
     }
+    return $content
 }
 
 function Get-AppliedLayoutsFromEditorParams([hashtable] $editorParams, [hashtable[]] $layouts) {
@@ -12,15 +20,15 @@ function Get-AppliedLayoutsFromEditorParams([hashtable] $editorParams, [hashtabl
     for ($i = 0; $i -lt [Math]::Min($monitors.Count, $layouts.Count); $i++) {
         $mon    = $monitors[$i]
         $layout = $layouts[$i]
-        $entries += @{
-            device = @{
+        $entries += [ordered]@{
+            device = [ordered]@{
                 'monitor'          = $mon['monitor']
                 'monitor-instance' = $mon['monitor-instance-id']
                 'monitor-number'   = $mon['monitor-number']
                 'serial-number'    = $mon['monitor-serial-number']
                 'virtual-desktop'  = $mon['virtual-desktop']
             }
-            'applied-layout' = @{
+            'applied-layout' = [ordered]@{
                 uuid                = $layout['uuid']
                 type                = 'custom'
                 'show-spacing'      = $false
@@ -30,7 +38,7 @@ function Get-AppliedLayoutsFromEditorParams([hashtable] $editorParams, [hashtabl
             }
         }
     }
-    return @{ 'applied-layouts' = $entries }
+    return [ordered]@{ 'applied-layouts' = $entries }
 }
 
 if ($MyInvocation.InvocationName -ne ".") {
@@ -43,10 +51,9 @@ if ($MyInvocation.InvocationName -ne ".") {
 PowerToys settings file not found. Launch PowerToys once to create it, then re-run deploy.
 "@)
     } else {
-        $json = ConvertFrom-Json (Get-Content -Raw $settingsFile) -AsHashtable
-        Set-PowerToysEnabledModules $json.enabled @("FancyZones")
-        $newText = ConvertTo-Json $json -Depth 10
-        Install-TextToFile $stage $settingsFile $newText -BackupFile
+        $content = Import-TextFile $settingsFile
+        $content = Set-PowerToysEnabledModules $content @("FancyZones") $settingsFile
+        Install-TextToFile $stage $settingsFile $content -BackupFile
     }
 
     $installationTracker.EndStage($stage)

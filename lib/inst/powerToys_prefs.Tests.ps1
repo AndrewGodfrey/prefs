@@ -1,35 +1,52 @@
 BeforeAll {
+    Import-Module "$HOME/prat/lib/TextFileEditor/TextFileEditor.psd1" -Force
     . "$PSScriptRoot/powerToys_prefs.ps1"
 }
 
 Describe "Set-PowerToysEnabledModules" {
+    BeforeAll {
+        $script:filename = "test.json"
+    }
+
     It "disables all modules when keepEnabled is empty" {
-        $enabled = @{ FancyZones = $true; AlwaysOnTop = $true; ColorPicker = $true }
+        $json = "{`n  `"enabled`": {`n    `"FancyZones`": true,`n    `"AlwaysOnTop`": true,`n    `"ColorPicker`": true`n  }`n}"
 
-        Set-PowerToysEnabledModules $enabled @()
+        $result = Set-PowerToysEnabledModules $json @() $script:filename
 
-        $enabled.FancyZones  | Should -Be $false
-        $enabled.AlwaysOnTop | Should -Be $false
-        $enabled.ColorPicker | Should -Be $false
+        $parsed = ConvertFrom-Json $result -AsHashtable
+        $parsed.enabled.FancyZones  | Should -Be $false
+        $parsed.enabled.AlwaysOnTop | Should -Be $false
+        $parsed.enabled.ColorPicker | Should -Be $false
     }
 
     It "keeps listed modules enabled and disables the rest" {
-        $enabled = @{ FancyZones = $false; AlwaysOnTop = $true; ColorPicker = $true }
+        $json = "{`n  `"enabled`": {`n    `"FancyZones`": false,`n    `"AlwaysOnTop`": true,`n    `"ColorPicker`": true`n  }`n}"
 
-        Set-PowerToysEnabledModules $enabled @("FancyZones")
+        $result = Set-PowerToysEnabledModules $json @("FancyZones") $script:filename
 
-        $enabled.FancyZones  | Should -Be $true
-        $enabled.AlwaysOnTop | Should -Be $false
-        $enabled.ColorPicker | Should -Be $false
+        $parsed = ConvertFrom-Json $result -AsHashtable
+        $parsed.enabled.FancyZones  | Should -Be $true
+        $parsed.enabled.AlwaysOnTop | Should -Be $false
+        $parsed.enabled.ColorPicker | Should -Be $false
     }
 
-    It "leaves an already-disabled module disabled" {
-        $enabled = @{ FancyZones = $false; AlwaysOnTop = $false }
+    It "leaves an already-enabled module enabled" {
+        $json = "{`n  `"enabled`": {`n    `"FancyZones`": true,`n    `"AlwaysOnTop`": false`n  }`n}"
 
-        Set-PowerToysEnabledModules $enabled @("FancyZones")
+        $result = Set-PowerToysEnabledModules $json @("FancyZones") $script:filename
 
-        $enabled.FancyZones  | Should -Be $true
-        $enabled.AlwaysOnTop | Should -Be $false
+        $parsed = ConvertFrom-Json $result -AsHashtable
+        $parsed.enabled.FancyZones  | Should -Be $true
+        $parsed.enabled.AlwaysOnTop | Should -Be $false
+    }
+
+    It "preserves surrounding JSON structure" {
+        $json = "{`n  `"enabled`": {`n    `"FancyZones`": false`n  },`n  `"other`": `"value`"`n}"
+
+        $result = Set-PowerToysEnabledModules $json @("FancyZones") $script:filename
+
+        $result | Should -Match '"FancyZones": true'
+        $result | Should -Match '"other": "value"'
     }
 }
 
