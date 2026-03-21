@@ -60,8 +60,8 @@ if ($rl) {
                 $creset7 = "$esc[0m"
             }
         }
-        $rlBars7  = [math]::Min(5, [math]::Round($usedPct7 / 100 * 5))
-        $rlBar7   = ([string]'▰' * $rlBars7) + ([string]'▱' * (5 - $rlBars7))
+        $rlBars7  = [math]::Min(7, [math]::Round($usedPct7 / 100 * 7))
+        $rlBar7   = ([string]'▰' * $rlBars7) + ([string]'▱' * (7 - $rlBars7))
         $rlParts += "${color7}7d:$rlBar7 $timeStr7${creset7}"
     }
 }
