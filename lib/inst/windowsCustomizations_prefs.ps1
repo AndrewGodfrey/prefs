@@ -44,54 +44,97 @@ function installShellCustomization($stage) {
 function installWindowsTerminalCustomization($stage) {
     $settingsFile = "$env:localappdata\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json"
 
-    $json = ConvertFrom-Json (Get-Content -Raw $settingsFile) -AsHashtable
-
-    customizeTerminal $json
-
-    $newText = ConvertTo-Json $json -Depth 20
-    Install-TextToFile $stage $settingsFile $newText -BackupFile
-}
-
-function customizeTerminal($json) {
-    $json.initialCols = 140
-    $json.initialRows = 50
-    $json.profiles.defaults.elevate = $false
-    $json.profiles.defaults.font = @{ size = 10 }
-
-    ensurePscoreProfile $json
-    $json.defaultProfile = getGuid_PsProfile
-}
-
-function findProfileIndex($list, $name) {
-    for ([int] $index = 0; $index -lt $list.length; $index++) {
-        if ($list[$index].name -eq $name) { return $index }
+    if (!(Test-Path $settingsFile)) {
+        $stage.EnsureManualStep("windowsTerminal\firstRun", "Windows Terminal settings.json not found. Open Windows Terminal once, then re-run deploy.")
+        return
     }
-    return -1
+
+    $content = Import-TextFile $settingsFile
+    $content = customizeTerminal $content $settingsFile
+    Install-TextToFile $stage $settingsFile $content -BackupFile
 }
 
-function ensureProfile($profiles, $name) {
-    $index = findProfileIndex $profiles.list $name
-    if ($index -ne -1) { return $profiles.list[$index] }
+# --- Terminal customization (JSON-tools based) ---
 
-    $newItem = [ordered] @{ name = $name }
-    $profiles.list += $newItem
-    return $newItem
+function getGuid_PsProfile         { "{574e775e-4f2a-5b96-ac1e-a2962a402336}" }
+function getGuid_PsElevatedProfile  { "{c30c622b-46f4-4ea9-a87e-e2522c699a56}" }
+
+# Surgically updates Windows Terminal settings content using JSON tools.
+# $bgColor: background color for the PowerShell profile. Defaults to "#1F2233".
+# TODO: detect primary vs VM and pick color accordingly — see plans/d_terminal.md.
+function customizeTerminal([string] $content, [string] $filename, [string] $bgColor = "#1F2233") {
+    $content = setJsonPropertyValue $content @("initialCols")    "145"                          $filename
+    $content = setJsonPropertyValue $content @("initialRows")    "50"                           $filename
+    $content = setJsonPropertyValue $content @("defaultProfile") "`"$(getGuid_PsProfile)`""     $filename
+
+    $content = Update-JsonSection $content @("profiles", "defaults") (buildDefaultsSection) $filename
+
+    $content = Update-JsonSection $content @("profiles", "list", "[@guid='$(getGuid_PsProfile)']")        (buildPsProfileSection $bgColor) $filename
+    $content = Update-JsonSection $content @("profiles", "list", "[@guid='$(getGuid_PsElevatedProfile)']") (buildElevatedProfileSection)    $filename
+
+    return $content
 }
 
-function ensurePscoreProfile($json) {
-    $profile = ensureProfile $json.profiles "PowerShell"
+# Replaces a scalar JSON property value, preserving indentation and trailing comma.
+# If the key is not found, returns $content unchanged.
+function setJsonPropertyValue([string] $content, [string[]] $pathArray, [string] $newJsonValue, [string] $filename) {
+    $range = Find-JsonSection $content $pathArray $filename
+    if ($null -eq $range) { return $content }
 
-    $profile.background = "#1F2233"
-    $profile.commandline = '"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo'
-    $profile.guid = getGuid_PsProfile
-    $profile.hidden = $false
-    $profile.opacity = 100
-    $profile.padding = "4"
-    $profile.scrollbarState = "visible"
-    $profile.source = "Windows.Terminal.PowershellCore"
-    $profile.useAcrylic = $false
+    $line  = ((ConvertTo-UnixLineEndings $content) -split "`n")[$range.idxFirst]
+    $indent        = [regex]::Match($line, '^\s*').Value
+    $key           = [regex]::Match($line, '"([^"]+)"\s*:').Groups[1].Value
+    $trailingComma = if ($line.TrimEnd().EndsWith(',')) { ',' } else { '' }
+    return Format-ReplaceLines $content $range "$indent`"$key`": $newJsonValue$trailingComma"
 }
 
-function getGuid_PsProfile { "{574e775e-4f2a-5b96-ac1e-a2962a402336}" }
+function buildDefaultsSection {
+    return @(
+        '        "defaults": {'
+        '            "elevate": false,'
+        '            "font": {'
+        '                "face": "Cascadia Mono",'
+        '                "size": 10'
+        '            },'
+        '            "padding": "4"'
+        '        }'
+    ) -join "`n"
+}
 
-main $installationTracker
+function buildPsProfileSection([string] $bgColor) {
+    $guid = getGuid_PsProfile
+    return @(
+        '        {'
+        "            `"background`": `"$bgColor`","
+        '            "commandline": "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -NoLogo",'
+        "            `"guid`": `"$guid`","
+        '            "hidden": false,'
+        '            "name": "PowerShell",'
+        '            "opacity": 100,'
+        '            "scrollbarState": "visible",'
+        '            "source": "Windows.Terminal.PowershellCore",'
+        '            "useAcrylic": false'
+        '        }'
+    ) -join "`n"
+}
+
+function buildElevatedProfileSection {
+    $guid = getGuid_PsElevatedProfile
+    return @(
+        '        {'
+        '            "background": "#3c2423",'
+        '            "commandline": "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -NoLogo",'
+        '            "elevate": true,'
+        "            `"guid`": `"$guid`","
+        '            "hidden": false,'
+        '            "name": "PowerShell (Elevated)",'
+        '            "opacity": 100,'
+        '            "scrollbarState": "visible",'
+        '            "useAcrylic": false'
+        '        }'
+    ) -join "`n"
+}
+
+if ($MyInvocation.InvocationName -ne ".") {
+    main $installationTracker
+}
