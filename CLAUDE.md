@@ -12,7 +12,7 @@ This depends on:
 
 ## Repo structure
 
-- `pathbin/` — scripts on PATH; `Get-DevEnvironments.ps1` chains prefs into prat's overlay mechanism
+- `pathbin/` — scripts on PATH; `Get-CodebaseLayers.ps1` chains prefs into prat's overlay mechanism
 - `lib/inst/` — bootstrap: `Install-Prefs.ps1`
 - `lib/` — `deploy_prefs.ps1` (main deploy entry point)
 
@@ -27,9 +27,9 @@ pwsh -File ~/prefs/lib/deploy_prefs.ps1
 ## Dev environment chain
 
 ```
-de's Get-DevEnvironments:    [de, prefs, prat]
-prefs's Get-DevEnvironments: [prefs, prat]    ← standalone works
-prat's Get-DevEnvironments:  [prat]
+de's Get-CodebaseLayers:    [de, prefs, prat]
+prefs's Get-CodebaseLayers: [prefs, prat]    ← standalone works
+prat's Get-CodebaseLayers:  [prat]
 ```
 
 Files use the `_prefs` suffix (e.g. `sshconfig_prefs.ps1`) following the `_de`/`_prat` convention.
