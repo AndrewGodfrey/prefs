@@ -1,10 +1,10 @@
 #Requires -PSEdition Core
 
 # .SYNOPSIS
-# deploy_prefs.ps1
+# deployLayer_prefs.ps1
 #
 # Deployment for Andrew's personal preferences (prefs repo).
-# Can be run standalone (cafe/VM) or called by deploy_de.ps1.
+# Can be run standalone (cafe/VM) or called by deployLayer_de.ps1.
 param ([switch] $Force, [string[]] $Suppress = @(), [string[]] $Enable = @(), [hashtable] $Config = @{})
 $ErrorActionPreference = "Stop"
 

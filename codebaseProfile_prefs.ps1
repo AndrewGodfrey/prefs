@@ -8,7 +8,7 @@
                 deploy = {
                     param($project, [hashtable]$CommandParameters = @{})
                     $force = [bool]($CommandParameters['Force'])
-                    pwsh -File "$($project.root)/lib/deploy_prefs.ps1" -Force:$force
+                    pwsh -File "$($project.root)/lib/deployLayer_prefs.ps1" -Force:$force
                 }
             }
         }
