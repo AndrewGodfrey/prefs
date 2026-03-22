@@ -8,8 +8,8 @@ BeforeAll {
         @{ used_percentage = $usedPct; resets_at = $script:now + [int]($minsLeft * 60) }
     }
 
-    function CallRlDisplay($usedPct, $minsLeft, $label = '5h', $barWidth = 5, $totalMins = 300, $redMins = 60, $minMinsLeft = 0) {
-        Get-RateLimitDisplay (MakeWindow $usedPct $minsLeft) $label $barWidth $totalMins $redMins $minMinsLeft $script:now
+    function CallRlDisplay($usedPct, $minsLeft, $label = '5h', $barWidth = 5, $totalMins = 300, $yellowMins = 180, $redMins = 60, $minMinsLeft = 0) {
+        Get-RateLimitDisplay (MakeWindow $usedPct $minsLeft) $label $barWidth $totalMins $yellowMins $redMins $minMinsLeft $script:now
     }
 }
 
@@ -17,23 +17,23 @@ Describe "claude-statusline" {
     Context "rate limit warnings" {
         # usedPct=50, minsLeft=120: elapsedMins=180, elapsedPct=60% — behind pace
         It "no color when on pace" {
-            CallRlDisplay 50 120 | Should -Not -Match '\[3[13]m'
+            CallRlDisplay 50 120 | Should -Not -Match '\[38;2;'
         }
 
         # usedPct=70, minsLeft=120: elapsedPct=60%; minsToExhaust=30*180/70=77 min → yellow
         It "yellow when ahead of pace but minsToExhaust >= redThreshold" {
-            CallRlDisplay 70 120 | Should -Match '\[33m'
-            CallRlDisplay 70 120 | Should -Not -Match '\[31m'
+            CallRlDisplay 70 120 | Should -Match '\[38;2;255;200;0m'
+            CallRlDisplay 70 120 | Should -Not -Match '\[38;2;255;120;0m'
         }
 
         # usedPct=90, minsLeft=200: elapsedPct=33%; minsToExhaust=10*100/90=11 min → red
         It "red when minsToExhaust < redThreshold" {
-            CallRlDisplay 90 200 | Should -Match '\[31m'
+            CallRlDisplay 90 200 | Should -Match '\[38;2;255;120;0m'
         }
 
         # elapsedMins=2 ≤ 5 — guard clause, no warning even at 90% used
         It "no warning when elapsed <= 5 minutes" {
-            CallRlDisplay 90 298 | Should -Not -Match '\[3[13]m'
+            CallRlDisplay 90 298 | Should -Not -Match '\[38;2;'
         }
 
         It "hidden when minsLeft < minMinsLeft" {
@@ -44,20 +44,20 @@ Describe "claude-statusline" {
     Context "7-day window" {
         # usedPct=70, minsLeft=5000: elapsedMins=5080, elapsedPct=50.4%; minsToExhaust=30*5080/70=2177 min → yellow
         It "yellow when ahead of pace but minsToExhaust >= 1440" {
-            CallRlDisplay 70 5000 -label '7d' -barWidth 7 -totalMins 10080 -redMins 1440 | Should -Match '\[33m'
+            CallRlDisplay 70 5000 -label '7d' -barWidth 7 -totalMins 10080 -yellowMins 4320 -redMins 1440 | Should -Match '\[38;2;255;200;0m'
         }
 
         # usedPct=90, minsLeft=9000: elapsedMins=1080, elapsedPct=10.7%; minsToExhaust=10*1080/90=120 min → red
         It "red when minsToExhaust < 1440" {
-            CallRlDisplay 90 9000 -label '7d' -barWidth 7 -totalMins 10080 -redMins 1440 | Should -Match '\[31m'
+            CallRlDisplay 90 9000 -label '7d' -barWidth 7 -totalMins 10080 -yellowMins 4320 -redMins 1440 | Should -Match '\[38;2;255;120;0m'
         }
 
         It "shows days format (1dp) when minsLeft >= 1440" {
-            CallRlDisplay 10 2880 -label '7d' -barWidth 7 -totalMins 10080 -redMins 1440 | Should -Match '7d:.*2\.0d'
+            CallRlDisplay 10 2880 -label '7d' -barWidth 7 -totalMins 10080 -yellowMins 4320 -redMins 1440 | Should -Match '7d:.*2\.0d'
         }
 
         It "shows seconds when minsLeft < 1" {
-            CallRlDisplay 10 0.5 -label '7d' -barWidth 7 -totalMins 10080 -redMins 1440 | Should -Match '7d:.*30s'
+            CallRlDisplay 10 0.5 -label '7d' -barWidth 7 -totalMins 10080 -yellowMins 4320 -redMins 1440 | Should -Match '7d:.*30s'
         }
     }
 
@@ -71,7 +71,7 @@ Describe "claude-statusline" {
         }
 
         It "7d shows hours (1dp) when 90 <= minsLeft < 1440" {
-            CallRlDisplay 10 120 -label '7d' -barWidth 7 -totalMins 10080 -redMins 1440 | Should -Match '7d:.*2\.0h'
+            CallRlDisplay 10 120 -label '7d' -barWidth 7 -totalMins 10080 -yellowMins 4320 -redMins 1440 | Should -Match '7d:.*2\.0h'
         }
     }
 
