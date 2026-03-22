@@ -1,8 +1,8 @@
 Import-Module "$home\prat\lib\PratBase\PratBase.psd1" -ErrorAction SilentlyContinue
 
 # Returns a formatted rate-limit display string, or nothing if the window is too new or too close to reset.
-# Color: yellow = on pace to exhaust before reset; red = exhaustion within $redThresholdMins.
-function Get-RateLimitDisplay($window, $label, $barWidth, $totalMins, $redThresholdMins, $minMinsLeft, $now) {
+# Color: yellow-green = on pace to exhaust; yellow = within $yellowThresholdMins; orange = within $redThresholdMins; red = completely out.
+function Get-RateLimitDisplay($window, $label, $barWidth, $totalMins, $yellowThresholdMins, $redThresholdMins, $minMinsLeft, $now) {
     if ($null -eq $window) { return }
     $usedPct  = $window.used_percentage
     $minsLeft = [math]::Max(0, $window.resets_at - $now) / 60
@@ -12,11 +12,20 @@ function Get-RateLimitDisplay($window, $label, $barWidth, $totalMins, $redThresh
 
     $elapsedMins = $totalMins - $minsLeft
     $color = $creset = ''
-    if ($elapsedMins -gt 5 -and $usedPct -gt 0) {
+    if ($usedPct -ge 100) {
+        $color  = "`e[38;2;220;50;50m"    # red: completely out
+        $creset = "`e[0m"
+    } elseif ($elapsedMins -gt 5 -and $usedPct -gt 0) {
         $elapsedPct = $elapsedMins / $totalMins * 100
         if ($usedPct -gt $elapsedPct) {
             $minsToExhaust = (100 - $usedPct) * $elapsedMins / $usedPct
-            $color  = if ($minsToExhaust -lt $redThresholdMins) { "`e[31m" } else { "`e[33m" }
+            $color = if ($minsToExhaust -lt $redThresholdMins) {
+                "`e[38;2;255;120;0m"       # orange: exhaustion imminent
+            } elseif ($minsToExhaust -lt $yellowThresholdMins) {
+                "`e[38;2;255;200;0m"       # yellow: in-between
+            } else {
+                "`e[38;2;140;185;35m"      # yellow-green: on pace to exhaust
+            }
             $creset = "`e[0m"
         }
     }
@@ -45,9 +54,9 @@ if ($MyInvocation.InvocationName -ne '.') {
     $rl = $j.rate_limits
     if ($rl) {
         $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-        $part = Get-RateLimitDisplay $rl.five_hour '5h' 5 300   60   15 $now
+        $part = Get-RateLimitDisplay $rl.five_hour '5h' 5 300   180  60   15 $now
         if ($part) { $rlParts += $part }
-        $part = Get-RateLimitDisplay $rl.seven_day '7d' 7 10080 1440 0  $now
+        $part = Get-RateLimitDisplay $rl.seven_day '7d' 7 10080 4320 1440 0  $now
         if ($part) { $rlParts += $part }
     }
     $rlStr = if ($rlParts) { " $($rlParts -join ' ')" } else { '' }
