@@ -8,16 +8,6 @@ Describe "customizeTerminal" {
         $script:filename = "test.json"
 
         # Minimal Windows Terminal settings.json (4-space indent, matching real format).
-        # Lines (0-based):
-        #  0: {
-        #  1:     "defaultProfile": "{old-guid}",
-        #  2:     "initialCols": 120,
-        #  3:     "initialRows": 30,
-        #  4:     "profiles": {
-        #  5:         "defaults": {},
-        #  6:         "list": []
-        #  7:     }
-        #  8: }
         $script:baseJson = "{`n" +
             "    `"defaultProfile`": `"{old-guid}`",`n" +
             "    `"initialCols`": 120,`n" +
@@ -25,7 +15,8 @@ Describe "customizeTerminal" {
             "    `"profiles`": {`n" +
             "        `"defaults`": {},`n" +
             "        `"list`": []`n" +
-            "    }`n" +
+            "    },`n" +
+            "    `"actions`": []`n" +
             "}"
     }
 
@@ -94,6 +85,24 @@ Describe "customizeTerminal" {
         $list = (ConvertFrom-Json $result -AsHashtable).profiles.list
         $list[0]['guid'] | Should -Be (getGuid_PsProfile)
         $list[1]['guid'] | Should -Be (getGuid_PsElevatedProfile)
+    }
+
+    It "adds shift+enter keybinding to send a newline" {
+        $result = customizeTerminal $script:baseJson $script:filename "#1F2233"
+        $binding = (ConvertFrom-Json $result -AsHashtable).actions |
+                   Where-Object { $_['keys'] -eq 'shift+enter' }
+        $binding                      | Should -Not -BeNull
+        $binding['command']['action'] | Should -Be "sendInput"
+        $binding['command']['input']  | Should -Be "`n"
+    }
+
+    It "adds ctrl+backspace keybinding to send ctrl+w (delete word)" {
+        $result = customizeTerminal $script:baseJson $script:filename "#1F2233"
+        $binding = (ConvertFrom-Json $result -AsHashtable).actions |
+                   Where-Object { $_['keys'] -eq 'ctrl+backspace' }
+        $binding                      | Should -Not -BeNull
+        $binding['command']['action'] | Should -Be "sendInput"
+        $binding['command']['input']  | Should -Be ([char]0x17).ToString()
     }
 
     It "is idempotent: running twice produces the same result" {

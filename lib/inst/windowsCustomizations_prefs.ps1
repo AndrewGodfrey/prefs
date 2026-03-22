@@ -75,6 +75,9 @@ function customizeTerminal([string] $content, [string] $filename, [string] $bgCo
     $content = Move-JsonArrayElementToFirst $content @("profiles", "list", "[@guid='$(getGuid_PsElevatedProfile)']") $filename
     $content = Move-JsonArrayElementToFirst $content @("profiles", "list", "[@guid='$(getGuid_PsProfile)']")        $filename
 
+    $content = Update-JsonSection $content @("actions", "[@keys='shift+enter']")    (buildShiftEnterKeybinding)    $filename
+    $content = Update-JsonSection $content @("actions", "[@keys='ctrl+backspace']") (buildCtrlBackspaceKeybinding) $filename
+
     return $content
 }
 
@@ -117,6 +120,24 @@ function buildPsProfileSection([string] $bgColor) {
         '            "scrollbarState": "visible",'
         '            "source": "Windows.Terminal.PowershellCore",'
         '            "useAcrylic": false'
+        '        }'
+    ) -join "`n"
+}
+
+function buildShiftEnterKeybinding {
+    return @(
+        '        {'
+        '            "command": { "action": "sendInput", "input": "\u000A" },'
+        '            "keys": "shift+enter"'
+        '        }'
+    ) -join "`n"
+}
+
+function buildCtrlBackspaceKeybinding {
+    return @(
+        '        {'
+        '            "command": { "action": "sendInput", "input": "\u0017" },'
+        '            "keys": "ctrl+backspace"'
         '        }'
     ) -join "`n"
 }
