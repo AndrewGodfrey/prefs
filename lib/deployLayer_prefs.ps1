@@ -30,6 +30,7 @@ try {
     & $libInst\googleChrome_prefs.ps1          $it $Suppress
     & $libInst\autoHotKey_prefs.ps1 $it $Suppress  # must precede windowsCustomizations (taskpane icons step references AHK)
     & $libInst\windowsCustomizations_prefs.ps1 $it
+    & $libInst\contextTool_prefs.ps1           $it
 
 } catch {
     if ($null -ne $it) { $it.ReportErrorContext($error[0]) }
