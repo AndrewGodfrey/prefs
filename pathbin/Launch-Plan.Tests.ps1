@@ -67,6 +67,17 @@ Describe "saveDb / loadDb round-trip" {
         @($result[0].sessionIds)   | Should -Be @("sid1", "sid2")
     }
 
+    It "round-trips a List with entries" {
+        $db = [System.Collections.Generic.List[object]]::new()
+        $db.Add([pscustomobject]@{planFile = "C:/plans/foo.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()})
+
+        saveDb $db "TestDrive:\rt-list.json"
+        $result = loadDb "TestDrive:\rt-list.json"
+
+        @($result)           | Should -HaveCount 1
+        $result[0].planFile  | Should -Be "C:/plans/foo.md"
+    }
+
     It "round-trips an empty db as an empty array" {
         $db = [System.Collections.Generic.List[object]]::new()
 
@@ -326,15 +337,29 @@ Describe "openProject" {
         Should -Invoke launchCl -Times 1
     }
 
-    It "ready + live: does nothing, does not launch" {
+    It "ready + live: does nothing, does not launch, returns false" {
         $db    = [System.Collections.Generic.List[object]]::new()
         $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "ready"; cwd = "C:/de"; sessionIds = @("live-sid")}
         $db.Add($entry)
         Mock Read-Host { "" }
 
-        openProject $db $entry @("live-sid")
+        $result = openProject $db $entry @("live-sid")
 
-        $entry.state | Should -Be "ready"
+        $result       | Should -BeFalse
+        $entry.state  | Should -Be "ready"
+        Should -Invoke launchCl -Times 0
+    }
+
+    It "non-ready + live: does nothing, does not launch, returns false" {
+        $db    = [System.Collections.Generic.List[object]]::new()
+        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "in-progress"; cwd = "C:/de"; sessionIds = @("live-sid")}
+        $db.Add($entry)
+        Mock Read-Host { "" }
+
+        $result = openProject $db $entry @("live-sid")
+
+        $result       | Should -BeFalse
+        $entry.state  | Should -Be "in-progress"
         Should -Invoke launchCl -Times 0
     }
 
@@ -377,3 +402,118 @@ Describe "openProject" {
     }
 }
 
+Describe "registerProject" {
+    BeforeEach {
+        Mock saveDb { }
+        Mock Write-Host { }
+        Mock Read-Host { "" }
+    }
+
+    It "does nothing when no orphans" {
+        $db    = [System.Collections.Generic.List[object]]::new()
+        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
+        $db.Add($entry)
+        $orphans = [System.Collections.Generic.List[string]]::new()
+        $live    = [System.Collections.Generic.HashSet[string]]::new()
+
+        registerProject $db $orphans $live
+
+        @($entry.sessionIds) | Should -HaveCount 0
+        Should -Invoke saveDb -Times 0
+    }
+
+    It "shows no-plans message when db is empty and no plans dir configured" {
+        $db      = [System.Collections.Generic.List[object]]::new()
+        $orphans = [System.Collections.Generic.List[string]]::new()
+        $orphans.Add("sid-x")
+        $live    = [System.Collections.Generic.HashSet[string]]::new()
+        Mock getPlansDir { return $null }
+        Mock pickFromList { return 0 }   # picks session; plan list will be empty
+
+        registerProject $db $orphans $live
+
+        Should -Invoke saveDb -Times 0
+    }
+
+    It "links session to plan, updates live set, removes from orphans" {
+        $db    = [System.Collections.Generic.List[object]]::new()
+        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
+        $db.Add($entry)
+        $orphans = [System.Collections.Generic.List[string]]::new()
+        $orphans.Add("new-sid")
+        $live    = [System.Collections.Generic.HashSet[string]]::new()
+        Mock pickFromList { return 0 }
+
+        registerProject $db $orphans $live
+
+        $entry.sessionIds      | Should -Contain "new-sid"
+        $live                  | Should -Contain "new-sid"
+        $orphans               | Should -Not -Contain "new-sid"
+        Should -Invoke saveDb -Times 1
+    }
+
+    It "creates db entry and links session for untracked plan" {
+        $plansDir = "TestDrive:\plans-register"
+        $null = New-Item -ItemType Directory $plansDir
+        Set-Content "$plansDir\new-plan.md" '# new plan'
+        $db      = [System.Collections.Generic.List[object]]::new()
+        $orphans = [System.Collections.Generic.List[string]]::new()
+        $orphans.Add("new-sid")
+        $live    = [System.Collections.Generic.HashSet[string]]::new()
+        Mock getPlansDir { return (Resolve-Path "TestDrive:\plans-register").Path }
+        Mock pickFromList { return 0 }
+
+        registerProject $db $orphans $live
+
+        $db.Count            | Should -Be 1
+        $db[0].sessionIds    | Should -Contain "new-sid"
+        $live                | Should -Contain "new-sid"
+        $orphans             | Should -Not -Contain "new-sid"
+        Should -Invoke saveDb -Times 1
+    }
+
+    It "does not duplicate session already in entry" {
+        $db    = [System.Collections.Generic.List[object]]::new()
+        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @("new-sid")}
+        $db.Add($entry)
+        $orphans = [System.Collections.Generic.List[string]]::new()
+        $orphans.Add("new-sid")
+        $live    = [System.Collections.Generic.HashSet[string]]::new()
+        Mock pickFromList { return 0 }
+
+        registerProject $db $orphans $live
+
+        @($entry.sessionIds) | Should -HaveCount 1
+    }
+
+    It "does nothing when user cancels session pick" {
+        $db    = [System.Collections.Generic.List[object]]::new()
+        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
+        $db.Add($entry)
+        $orphans = [System.Collections.Generic.List[string]]::new()
+        $orphans.Add("new-sid")
+        $live    = [System.Collections.Generic.HashSet[string]]::new()
+        Mock pickFromList { return $null }
+
+        registerProject $db $orphans $live
+
+        @($entry.sessionIds) | Should -HaveCount 0
+        Should -Invoke saveDb -Times 0
+    }
+
+    It "does nothing when user cancels plan pick" {
+        $db    = [System.Collections.Generic.List[object]]::new()
+        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
+        $db.Add($entry)
+        $orphans = [System.Collections.Generic.List[string]]::new()
+        $orphans.Add("new-sid")
+        $live    = [System.Collections.Generic.HashSet[string]]::new()
+        $script:pickCallCount = 0
+        Mock pickFromList { if ($script:pickCallCount++ -eq 0) { return 0 } else { return $null } }
+
+        registerProject $db $orphans $live
+
+        @($entry.sessionIds) | Should -HaveCount 0
+        Should -Invoke saveDb -Times 0
+    }
+}

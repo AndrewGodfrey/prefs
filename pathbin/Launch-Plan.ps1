@@ -1,4 +1,4 @@
-# Launch-Plan.ps1  (alias: lp)
+# Launch-Plan.ps1  (alias: pl)
 # Interactive launcher for plan-based Claude sessions.
 # Tracks open plans, detects live/dormant Claude processes, and launches or resumes sessions.
 
@@ -10,7 +10,8 @@ $runningDir = "$home/prat/auto/context/running"
 function main {
     Import-Module "$home/prat/lib/PratBase/PratBase.psd1" -ErrorAction SilentlyContinue
 
-    $db       = [System.Collections.Generic.List[object]](loadDb $dbPath)
+    $db = [System.Collections.Generic.List[object]]::new()
+    foreach ($item in (loadDb $dbPath)) { $db.Add($item) }
     $livePids = getLiveClaudePids
     $resolved = resolveSessionIds $db $runningDir $livePids
     saveDb $db $dbPath
@@ -27,12 +28,12 @@ function main {
         $crossFlags = getCrossMachineFlags $syncPath
     }
 
-    runLauncher $db $resolved.liveSessionIds $crossFlags
+    runLauncher $db $resolved.liveSessionIds $resolved.orphans $crossFlags
 }
 
 # --- TUI ---
 
-function runLauncher($db, $liveSessionIds, $crossFlags) {
+function runLauncher($db, $liveSessionIds, $orphans, $crossFlags) {
     $selected = 0
     while ($true) {
         renderList $db $selected $liveSessionIds $crossFlags
@@ -43,14 +44,17 @@ function runLauncher($db, $liveSessionIds, $crossFlags) {
             'Enter' {
                 if ($db.Count -gt 0) {
                     [Console]::Clear()
-                    openProject $db $db[$selected] $liveSessionIds
-                    return
+                    if (openProject $db $db[$selected] $liveSessionIds) { return }
                 }
             }
             { $_ -in 'O', 'o' } {
                 [Console]::Clear()
                 openUntracked $db
                 return
+            }
+            { $_ -in 'R', 'r' } {
+                [Console]::Clear()
+                registerProject $db $orphans $liveSessionIds
             }
             { $_ -in 'Q', 'q', 'Escape' } { [Console]::Clear(); return }
         }
@@ -83,18 +87,18 @@ function renderList($db, $selected, $liveSessionIds, $crossFlags) {
     }
 
     Write-Host ''
-    Write-Host '  [↑↓] navigate  [Enter] open  [O] open untracked  [Q] quit' -ForegroundColor DarkCyan
+    Write-Host '  [↑↓] navigate  [Enter] open  [O] open untracked  [R] register session  [Q] quit' -ForegroundColor DarkCyan
 }
 
 # --- Actions ---
 
 function openProject($db, $entry, $liveSessionIds) {
+    if (isLive $entry $liveSessionIds) {
+        Write-Host 'A Claude session is already live for this plan — switch to it instead.' -ForegroundColor Yellow
+        $null = Read-Host 'Press Enter to return'
+        return $false
+    }
     if ($entry.state -eq 'ready') {
-        if (isLive $entry $liveSessionIds) {
-            Write-Host 'A Claude session is already live for this plan — switch to it instead.' -ForegroundColor Yellow
-            $null = Read-Host 'Press Enter to return'
-            return
-        }
         $entry.state      = 'in-progress'
         $entry.sessionIds = @()
         $entry.cwd        = normalizePath $PWD.Path
@@ -112,6 +116,7 @@ function openProject($db, $entry, $liveSessionIds) {
             launchCl "Let's continue work on $($entry.planFile)"
         }
     }
+    return $true
 }
 
 function launchCl {
@@ -187,6 +192,57 @@ function openUntracked($db) {
     }
 }
 
+function registerProject($db, $orphans, $liveSessionIds) {
+    if ($orphans.Count -eq 0) {
+        Write-Host 'No unregistered sessions.' -ForegroundColor Yellow
+        $null = Read-Host 'Press Enter to return'
+        return
+    }
+
+    $sidIdx = pickFromList $orphans { param($s) $s } 'Register — pick session'
+    if ($null -eq $sidIdx) { return }
+    $sid = $orphans[$sidIdx]
+
+    # Build plan list: tracked entries + untracked from plansDir
+    $trackedPaths = @($db | ForEach-Object { $_.planFile })
+    $allPlans     = [System.Collections.Generic.List[string]]::new()
+    foreach ($e in $db) { $allPlans.Add($e.planFile) }
+    $plansDir = getPlansDir
+    if ($plansDir) {
+        Get-ChildItem $plansDir -Filter '*.md' -File |
+            Where-Object { (normalizePath $_.FullName) -notin $trackedPaths } |
+            ForEach-Object { $allPlans.Add((normalizePath $_.FullName)) }
+    }
+
+    if ($allPlans.Count -eq 0) {
+        Write-Host 'No plans found.' -ForegroundColor Yellow
+        $null = Read-Host 'Press Enter to return'
+        return
+    }
+
+    $planIdx = pickFromList $allPlans { param($p) Split-Path $p -Leaf } 'Register — pick plan'
+    if ($null -eq $planIdx) { return }
+    $planFile = $allPlans[$planIdx]
+
+    $entry = $db | Where-Object { $_.planFile -eq $planFile } | Select-Object -First 1
+    if (-not $entry) {
+        $entry = [pscustomobject]@{
+            planFile   = $planFile
+            state      = 'in-progress'
+            cwd        = normalizePath $PWD.Path
+            sessionIds = @()
+        }
+        $db.Add($entry)
+    }
+
+    if ($sid -notin $entry.sessionIds) {
+        $entry.sessionIds = @($entry.sessionIds) + @($sid)
+    }
+    $null = $liveSessionIds.Add($sid)
+    $orphans.Remove($sid) | Out-Null
+    saveDb $db $dbPath
+}
+
 function pickFromList($items, $labelFn, $title) {
     $selected = 0
     while ($true) {
@@ -204,8 +260,8 @@ function pickFromList($items, $labelFn, $title) {
 
         $key = [Console]::ReadKey($true)
         switch ($key.Key) {
-            'UpArrow'   { if ($selected -gt 0) { $selected-- } }
-            'DownArrow' { if ($selected -lt ($items.Count - 1)) { $selected++ } }
+            'UpArrow'   { $selected = if ($selected -gt 0) { $selected - 1 } else { [Math]::Max(0, $items.Count - 1) } }
+            'DownArrow' { $selected = if ($selected -lt ($items.Count - 1)) { $selected + 1 } else { 0 } }
             'Enter'     { return $selected }
             'Escape'    { return $null }
         }
@@ -241,7 +297,7 @@ function getLiveClaudePids {
 function resolveSessionIds {
     [CmdletBinding()] param($entries, [string] $rDir, $livePids)
     $liveSessionIds = [System.Collections.Generic.HashSet[string]]::new()
-    $orphans        = @()
+    $orphans        = [System.Collections.Generic.List[string]]::new()
 
     # Build reverse map: session_id → entry
     $sidMap = @{}
@@ -271,7 +327,7 @@ function resolveSessionIds {
             $cwdEntry.sessionIds = @($cwdEntry.sessionIds) + @($sid)
             $sidMap[$sid] = $cwdEntry
         } else {
-            $orphans += $sid
+            $orphans.Add($sid) | Out-Null
         }
 
         $null = $liveSessionIds.Add($sid)
