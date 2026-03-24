@@ -517,3 +517,25 @@ Describe "registerProject" {
         Should -Invoke saveDb -Times 0
     }
 }
+
+Describe "getPlanTitle" {
+    It "returns title from first heading" {
+        Set-Content "TestDrive:\title1.md" "# My Plan Title"
+        getPlanTitle (Get-Item "TestDrive:\title1.md").FullName | Should -Be 'My Plan Title'
+    }
+
+    It "returns empty string when no heading" {
+        Set-Content "TestDrive:\title2.md" "some text"
+        getPlanTitle (Get-Item "TestDrive:\title2.md").FullName | Should -Be ''
+    }
+
+    It "finds heading not on the first line" {
+        Set-Content "TestDrive:\title3.md" @("preamble", "more text", "# Late Heading")
+        getPlanTitle (Get-Item "TestDrive:\title3.md").FullName | Should -Be 'Late Heading'
+    }
+
+    It "ignores ## subheadings before the first # heading" {
+        Set-Content "TestDrive:\title4.md" @("## Sub", "# Real Title")
+        getPlanTitle (Get-Item "TestDrive:\title4.md").FullName | Should -Be 'Real Title'
+    }
+}

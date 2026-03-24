@@ -49,8 +49,7 @@ function runLauncher($db, $liveSessionIds, $orphans, $crossFlags) {
             }
             { $_ -in 'O', 'o' } {
                 [Console]::Clear()
-                openUntracked $db
-                return
+                if (openUntracked $db) { return }
             }
             { $_ -in 'R', 'r' } {
                 [Console]::Clear()
@@ -165,8 +164,13 @@ function openUntracked($db) {
         return
     }
 
-    $idx = pickFromList $available { param($p) Split-Path $p -Leaf } 'Open plan'
-    if ($null -eq $idx) { return }
+    $idx = pickFromList $available {
+        param($p)
+        $name  = Split-Path $p -Leaf
+        $title = getPlanTitle $p
+        if ($title) { "$name  —  $title" } else { $name }
+    } 'Open plan'
+    if ($null -eq $idx) { return $false }
     $planFile = $available[$idx]
 
     Write-Host ''
@@ -190,6 +194,7 @@ function openUntracked($db) {
         saveDb $db $dbPath
         launchCl "We're starting work on $planFile"
     }
+    return $true
 }
 
 function registerProject($db, $orphans, $liveSessionIds) {
@@ -409,6 +414,12 @@ function checkSyncPath {
 }
 
 # --- Helpers ---
+
+function getPlanTitle([string] $path) {
+    $heading = Get-Content $path -TotalCount 10 | Where-Object { $_ -match '^# ' } | Select-Object -First 1
+    if ($heading) { return $heading -replace '^# ', '' }
+    return ''
+}
 
 function normalizePath([string] $p) { $p -replace '\\', '/' }
 
