@@ -8,6 +8,7 @@ $dbPath     = "$home/prat/auto/context/db.json"
 $runningDir = "$home/prat/auto/context/running"
 
 function main {
+    saveConsoleMode
     Import-Module "$home/prat/lib/PratBase/PratBase.psd1" -ErrorAction SilentlyContinue
 
     $db = [System.Collections.Generic.List[object]]::new()
@@ -17,26 +18,34 @@ function main {
     saveDb $db $dbPath
     cleanStaleRunningFiles $runningDir $livePids
 
+    $notices = [System.Collections.Generic.List[string]]::new()
+    foreach ($n in $resolved.notices) { $notices.Add($n) }
     if ($resolved.orphans.Count -gt 0) {
-        Write-Warning "lp: untracked Claude session(s): $($resolved.orphans -join ', ')"
+        $notices.Add("Untracked session(s): $($resolved.orphans -join ', ')")
     }
 
-    $syncPath   = getSyncPath
+    if (-not (getPlansDir)) { $notices.Add('No plans directory configured — O and R unavailable. Provide lib/claude/Get-PlansDir.ps1 in your de repo.') }
+
+    $syncResult = getSyncPath
+    $syncPath   = $syncResult.path
+    if ($syncResult.notice -and -not $NoSyncBackedWarning) { $notices.Add($syncResult.notice) }
     $crossFlags = @()
     if ($syncPath) {
         updatePresenceFile $db $syncPath
         $crossFlags = getCrossMachineFlags $syncPath
     }
 
-    runLauncher $db $resolved.liveSessionIds $resolved.orphans $crossFlags
+    runLauncher $db $resolved.liveSessionIds $resolved.orphans $crossFlags $notices
 }
 
 # --- TUI ---
 
-function runLauncher($db, $liveSessionIds, $orphans, $crossFlags) {
-    $selected = 0
+function runLauncher($db, $liveSessionIds, $orphans, $crossFlags, $notices) {
+    $selected      = 0
+    $transientError = $null
     while ($true) {
-        renderList $db $selected $liveSessionIds $crossFlags
+        renderList $db $selected $liveSessionIds $crossFlags $notices $transientError
+        $transientError = $null
         $key = [Console]::ReadKey($true)
         switch ($key.Key) {
             'UpArrow'   { $selected = if ($selected -gt 0) { $selected - 1 } else { [Math]::Max(0, $db.Count - 1) } }
@@ -55,17 +64,31 @@ function runLauncher($db, $liveSessionIds, $orphans, $crossFlags) {
                 [Console]::Clear()
                 registerProject $db $orphans $liveSessionIds
             }
+            { $_ -in 'U', 'u' } {
+                if ($db.Count -gt 0) {
+                    if (isLive $db[$selected] $liveSessionIds) {
+                        $transientError = 'Cannot unregister a live session — exit Claude first.'
+                    } else {
+                        $db.RemoveAt($selected)
+                        saveDb $db $dbPath
+                        if ($selected -ge $db.Count) { $selected = [Math]::Max(0, $db.Count - 1) }
+                    }
+                }
+            }
             { $_ -in 'Q', 'q', 'Escape' } { [Console]::Clear(); return }
         }
     }
 }
 
-function renderList($db, $selected, $liveSessionIds, $crossFlags) {
+function renderList($db, $selected, $liveSessionIds, $crossFlags, $notices, $transientError) {
     [Console]::Clear()
     Write-Host '  Plan Launcher' -ForegroundColor Cyan
     Write-Host ''
 
     if ($db.Count -eq 0) { Write-Host '  (no open plans — press O to open one)' -ForegroundColor DarkGray }
+
+    $maxNameLen  = if ($db.Count -gt 0) { ($db | ForEach-Object { (Split-Path $_.planFile -Leaf).Length } | Measure-Object -Maximum).Maximum } else { 0 }
+    $maxStateLen = if ($db.Count -gt 0) { ($db | ForEach-Object { $_.state.Length } | Measure-Object -Maximum).Maximum } else { 0 }
 
     for ($i = 0; $i -lt $db.Count; $i++) {
         $entry    = $db[$i]
@@ -79,14 +102,23 @@ function renderList($db, $selected, $liveSessionIds, $crossFlags) {
 
         Write-Host -NoNewline $prefix
         Write-Host -NoNewline $status -ForegroundColor $statusFg
-        Write-Host -NoNewline "  $planName" -ForegroundColor $nameFg
-        Write-Host -NoNewline "  $($entry.state)"
+        Write-Host -NoNewline "  $($planName.PadRight($maxNameLen))" -ForegroundColor $nameFg
+        Write-Host -NoNewline "  $($entry.state.PadRight($maxStateLen))"
         if ($isCross) { Write-Host -NoNewline '  ⚠ other-machine' -ForegroundColor Yellow }
         Write-Host ''
     }
 
     Write-Host ''
-    Write-Host '  [↑↓] navigate  [Enter] open  [O] open untracked  [R] register session  [Q] quit' -ForegroundColor DarkCyan
+    Write-Host '  [↑↓] navigate  [Enter] open  [O] open  [R] register  [U] unregister  [Q] quit' -ForegroundColor DarkCyan
+
+    if ($notices -and $notices.Count -gt 0) {
+        Write-Host ''
+        foreach ($n in $notices) { Write-Host "  ⚠ $n" -ForegroundColor Yellow }
+    }
+    if ($transientError) {
+        Write-Host ''
+        Write-Host "  ✗ $transientError" -ForegroundColor Red
+    }
 }
 
 # --- Actions ---
@@ -102,35 +134,106 @@ function openProject($db, $entry, $liveSessionIds) {
         $entry.sessionIds = @()
         $entry.cwd        = normalizePath $PWD.Path
         saveDb $db $dbPath
-        launchCl "Please do the next step in $($entry.planFile)"
+        $exitCode = launchCl $entry.cwd "Please do the next step in $($entry.planFile)"
+        showLaunchError $exitCode
+        if ($exitCode -ne 0) { return $false }
     } else {
         $sid = pickSessionId $entry
         if ($sid) {
             $entry.sessionIds = @($sid)
             saveDb $db $dbPath
-            launchCl --resume $sid
+            $exitCode = launchCl $entry.cwd --resume $sid
+            if ($exitCode -ne 0) {
+                $entry.sessionIds = @()
+                saveDb $db $dbPath
+                clearConsole
+                Write-Host 'Session not found — session ID cleared. Press Enter again to start fresh.' -ForegroundColor Yellow
+                $null = Read-Host 'Press Enter to return'
+                return $false
+            }
         } else {
             $entry.cwd = normalizePath $PWD.Path
             saveDb $db $dbPath
-            launchCl "Let's continue work on $($entry.planFile)"
+            $exitCode = launchCl $entry.cwd "Let's continue work on $($entry.planFile)"
+            showLaunchError $exitCode
+            if ($exitCode -ne 0) { return $false }
         }
     }
     return $true
 }
 
-function launchCl {
-    $tmpErr = [System.IO.Path]::GetTempFileName()
+$script:savedConsoleInMode  = $null
+$script:savedConsoleOutMode = $null
+
+function initLpConsoleType {
+    if ($null -eq ('LpConsole' -as [type])) {
+        Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class LpConsole {
+    public const int STD_INPUT_HANDLE  = -10;
+    public const int STD_OUTPUT_HANDLE = -11;
+    [DllImport("kernel32.dll", SetLastError=true)]
+    public static extern IntPtr GetStdHandle(int nStdHandle);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    public static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    public static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
+}
+"@
+    }
+}
+
+function saveConsoleMode {
+    # Call once before the TUI starts to capture the pristine console mode.
+    initLpConsoleType
+    $hIn  = [LpConsole]::GetStdHandle([LpConsole]::STD_INPUT_HANDLE)
+    $hOut = [LpConsole]::GetStdHandle([LpConsole]::STD_OUTPUT_HANDLE)
+    $mIn = 0u; $mOut = 0u
+    [LpConsole]::GetConsoleMode($hIn,  [ref]$mIn)  | Out-Null
+    [LpConsole]::GetConsoleMode($hOut, [ref]$mOut) | Out-Null
+    $script:savedConsoleInMode  = $mIn
+    $script:savedConsoleOutMode = $mOut
+}
+
+function resetConsoleMode {
+    # Restore the exact console mode from before the TUI started, and flush any
+    # stale key events left in the input buffer by the TUI loop.
+    if ($null -eq $script:savedConsoleInMode) { return }
+    initLpConsoleType
+    $hIn  = [LpConsole]::GetStdHandle([LpConsole]::STD_INPUT_HANDLE)
+    $hOut = [LpConsole]::GetStdHandle([LpConsole]::STD_OUTPUT_HANDLE)
+    [LpConsole]::SetConsoleMode($hIn,  $script:savedConsoleInMode)  | Out-Null
+    [LpConsole]::SetConsoleMode($hOut, $script:savedConsoleOutMode) | Out-Null
+}
+
+function launchCl([string] $cwd) {
+    resetConsoleMode
+    # Use Start-Process -NoNewWindow so the child process inherits the console directly,
+    # bypassing PowerShell's pipeline stdout/stderr capture which breaks interactive TUI apps.
+    # Use -EncodedCommand (Base64) to avoid Windows command-line quoting issues: Start-Process
+    # joins -ArgumentList with spaces without re-quoting, so inner quotes are stripped by argv
+    # parsing before pwsh reassembles them for -Command. Base64 has no special characters.
+    $argStr   = ($args | ForEach-Object { '"' + ($_ -replace '"', '""') + '"' }) -join ' '
+    $cmd      = if ($argStr) { "& cl $argStr" } else { '& cl' }
+    $encoded  = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd))
+    $spParams = @{ FilePath = 'pwsh'; ArgumentList = @('-NoLogo', '-EncodedCommand', $encoded); NoNewWindow = $true; Wait = $true; PassThru = $true }
+    if ($cwd) { $spParams.WorkingDirectory = $cwd }
     try {
-        & cl @args 2>$tmpErr
-        if ($LASTEXITCODE -ne 0) {
-            $errText = Get-Content $tmpErr -Raw -ErrorAction SilentlyContinue
-            [Console]::Clear()
-            Write-Host "cl exited with code $LASTEXITCODE" -ForegroundColor Red
-            if ($errText) { Write-Host $errText -ForegroundColor Red }
-            $null = Read-Host 'Press Enter to return'
-        }
-    } finally {
-        Remove-Item $tmpErr -ErrorAction SilentlyContinue
+        $proc = Start-Process @spParams
+        return $proc.ExitCode
+    } catch {
+        return 1
+    }
+}
+
+function clearConsole { [Console]::Clear() }  # thin wrapper so tests can mock it
+
+function showLaunchError([int] $exitCode) {
+    # Note: no console clear here — cl's own output is already visible; clearing would erase it.
+    if ($exitCode -ne 0) {
+        Write-Host "cl exited with code $exitCode" -ForegroundColor Red
+        $null = Read-Host 'Press Enter to return'
     }
 }
 
@@ -145,6 +248,18 @@ function pickSessionId($entry) {
     return $ids[[int]$choice]
 }
 
+function getAvailablePlanFiles([string] $plansDir) {
+    $base = normalizePath $plansDir
+    return @(Get-ChildItem $plansDir -Filter '*.md' -File -Recurse |
+        Where-Object {
+            $rel      = (normalizePath $_.FullName).Substring($base.Length + 1)
+            $baseName = [System.IO.Path]::GetFileNameWithoutExtension($_.Name)
+            ($rel -notmatch '(^|/)done/') -and ($baseName -notmatch '_done$')
+        } |
+        Select-Object -ExpandProperty FullName |
+        ForEach-Object { normalizePath $_ })
+}
+
 function openUntracked($db) {
     $plansDir = getPlansDir
     if (-not $plansDir) {
@@ -153,10 +268,8 @@ function openUntracked($db) {
         return
     }
     $openPlans = @($db | ForEach-Object { $_.planFile })
-    $available = @(Get-ChildItem $plansDir -Filter '*.md' -File |
-        Where-Object { (normalizePath $_.FullName) -notin $openPlans } |
-        Select-Object -ExpandProperty FullName |
-        ForEach-Object { normalizePath $_ })
+    $available = @(getAvailablePlanFiles $plansDir |
+        Where-Object { $_ -notin $openPlans })
 
     if ($available.Count -eq 0) {
         Write-Host 'No unopen plans found.' -ForegroundColor Yellow
@@ -164,11 +277,13 @@ function openUntracked($db) {
         return
     }
 
+    $base       = normalizePath $plansDir
+    $maxNameLen = ($available | ForEach-Object { $_.Substring($base.Length + 1).Length } | Measure-Object -Maximum).Maximum
     $idx = pickFromList $available {
         param($p)
-        $name  = Split-Path $p -Leaf
+        $name  = (normalizePath $p).Substring($base.Length + 1)
         $title = getPlanTitle $p
-        if ($title) { "$name  —  $title" } else { $name }
+        if ($title) { $name.PadRight($maxNameLen) + "  " + $title } else { $name }
     } 'Open plan'
     if ($null -eq $idx) { return $false }
     $planFile = $available[$idx]
@@ -186,13 +301,18 @@ function openUntracked($db) {
     }
     $db.Add($entry)
 
+    [Console]::Clear()
     if ($state -eq 'ready') {
         $entry.state = 'in-progress'
         saveDb $db $dbPath
-        launchCl "Please do the next step in $planFile"
+        $exitCode = launchCl $entry.cwd "Please do the next step in $planFile"
+        showLaunchError $exitCode
+        if ($exitCode -ne 0) { return $false }
     } else {
         saveDb $db $dbPath
-        launchCl "We're starting work on $planFile"
+        $exitCode = launchCl $entry.cwd "We're starting work on $planFile"
+        showLaunchError $exitCode
+        if ($exitCode -ne 0) { return $false }
     }
     return $true
 }
@@ -214,9 +334,9 @@ function registerProject($db, $orphans, $liveSessionIds) {
     foreach ($e in $db) { $allPlans.Add($e.planFile) }
     $plansDir = getPlansDir
     if ($plansDir) {
-        Get-ChildItem $plansDir -Filter '*.md' -File |
-            Where-Object { (normalizePath $_.FullName) -notin $trackedPaths } |
-            ForEach-Object { $allPlans.Add((normalizePath $_.FullName)) }
+        getAvailablePlanFiles $plansDir |
+            Where-Object { $_ -notin $trackedPaths } |
+            ForEach-Object { $allPlans.Add($_) }
     }
 
     if ($allPlans.Count -eq 0) {
@@ -250,23 +370,24 @@ function registerProject($db, $orphans, $liveSessionIds) {
 
 function pickFromList($items, $labelFn, $title) {
     $selected = 0
+    $labels   = @($items | ForEach-Object { & $labelFn $_ })
+
     while ($true) {
         [Console]::Clear()
         Write-Host "  $title" -ForegroundColor Cyan
         Write-Host ''
-        for ($i = 0; $i -lt $items.Count; $i++) {
+        for ($i = 0; $i -lt $labels.Count; $i++) {
             $prefix = if ($i -eq $selected) { '→ ' } else { '  ' }
-            $label  = & $labelFn $items[$i]
             $fg     = if ($i -eq $selected) { 'White' } else { 'Gray' }
-            Write-Host "$prefix$label" -ForegroundColor $fg
+            Write-Host "$prefix$($labels[$i])" -ForegroundColor $fg
         }
         Write-Host ''
         Write-Host '  [↑↓] navigate  [Enter] select  [Esc] cancel' -ForegroundColor DarkCyan
 
         $key = [Console]::ReadKey($true)
         switch ($key.Key) {
-            'UpArrow'   { $selected = if ($selected -gt 0) { $selected - 1 } else { [Math]::Max(0, $items.Count - 1) } }
-            'DownArrow' { $selected = if ($selected -lt ($items.Count - 1)) { $selected + 1 } else { 0 } }
+            'UpArrow'   { $selected = if ($selected -gt 0) { $selected - 1 } else { [Math]::Max(0, $labels.Count - 1) } }
+            'DownArrow' { $selected = if ($selected -lt ($labels.Count - 1)) { $selected + 1 } else { 0 } }
             'Enter'     { return $selected }
             'Escape'    { return $null }
         }
@@ -299,10 +420,10 @@ function getLiveClaudePids {
     return @(Get-Process claude -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
 }
 
-function resolveSessionIds {
-    [CmdletBinding()] param($entries, [string] $rDir, $livePids)
+function resolveSessionIds($entries, [string] $rDir, $livePids) {
     $liveSessionIds = [System.Collections.Generic.HashSet[string]]::new()
     $orphans        = [System.Collections.Generic.List[string]]::new()
+    $notices        = [System.Collections.Generic.List[string]]::new()
 
     # Build reverse map: session_id → entry
     $sidMap = @{}
@@ -310,8 +431,11 @@ function resolveSessionIds {
         foreach ($sid in $entry.sessionIds) { $sidMap[$sid] = $entry }
     }
 
-    if (-not (Test-Path $rDir)) { return @{ liveSessionIds = $liveSessionIds; orphans = $orphans } }
+    if (-not (Test-Path $rDir)) { return @{ liveSessionIds = $liveSessionIds; orphans = $orphans; notices = $notices } }
 
+    $unmatched = [System.Collections.Generic.List[object]]::new()
+
+    # Pass 1: resolve sessions already in the db by ID, populating liveSessionIds.
     foreach ($file in Get-ChildItem $rDir -Filter 'pid_*.txt' -ErrorAction SilentlyContinue) {
         $filePid = [int]($file.BaseName -replace 'pid_', '')
         if ($filePid -notin $livePids) { continue }
@@ -319,16 +443,22 @@ function resolveSessionIds {
         $data = Get-Content $file.FullName -Raw | ConvertFrom-Json -ErrorAction SilentlyContinue
         if (-not $data -or -not $data.session_id -or -not $data.cwd) { continue }
 
-        $sid      = $data.session_id
-        $fileCwd  = normalizePath $data.cwd
-        $cwdEntry = $entries | Where-Object { (normalizePath $_.cwd) -eq $fileCwd } | Select-Object -First 1
+        if ($sidMap.ContainsKey($data.session_id)) {
+            $null = $liveSessionIds.Add($data.session_id)
+        } else {
+            $unmatched.Add($data)
+        }
+    }
 
-        if ($sidMap.ContainsKey($sid)) {
-            $mapEntry = $sidMap[$sid]
-            if ($cwdEntry -and $mapEntry -ne $cwdEntry) {
-                Write-Warning "lp: session '$sid' conflicts: recorded under '$($mapEntry.planFile)' but cwd matches '$($cwdEntry.planFile)'"
-            }
-        } elseif ($cwdEntry) {
+    # Pass 2: cwd-match new sessions, excluding entries already occupied by a live session.
+    # This lets a new session find the correct entry even when multiple entries share a cwd.
+    foreach ($data in $unmatched) {
+        $sid        = $data.session_id
+        $fileCwd    = normalizePath $data.cwd
+        $cwdMatches = @($entries | Where-Object { (normalizePath $_.cwd) -eq $fileCwd -and -not (isLive $_ $liveSessionIds) })
+        $cwdEntry   = if ($cwdMatches.Count -eq 1) { $cwdMatches[0] } else { $null }
+
+        if ($cwdEntry) {
             $cwdEntry.sessionIds = @($cwdEntry.sessionIds) + @($sid)
             $sidMap[$sid] = $cwdEntry
         } else {
@@ -338,7 +468,7 @@ function resolveSessionIds {
         $null = $liveSessionIds.Add($sid)
     }
 
-    return @{ liveSessionIds = $liveSessionIds; orphans = $orphans }
+    return @{ liveSessionIds = $liveSessionIds; orphans = $orphans; notices = $notices }
 }
 
 function isLive($entry, $liveSessionIds) {
@@ -385,7 +515,6 @@ function getPlansDir {
     Import-Module "$home/prat/lib/PratBase/PratBase.psd1" -ErrorAction SilentlyContinue
     $configScript = Resolve-PratLibFile 'lib/claude/Get-PlansDir.ps1' -ErrorAction SilentlyContinue
     if ($configScript) { return & $configScript }
-    Write-Warning 'lp: no plans directory configured — open-untracked unavailable. Provide lib/claude/Get-PlansDir.ps1 in your de repo.'
     return $null
 }
 
@@ -393,24 +522,17 @@ function getSyncPath {
     Import-Module "$home/prat/lib/PratBase/PratBase.psd1" -ErrorAction SilentlyContinue
     $configScript = Resolve-PratLibFile 'lib/claude/Get-PlanTrackingConfig.ps1' -ErrorAction SilentlyContinue
     if (-not $configScript) {
-        if (-not $NoSyncBackedWarning) {
-            Write-Warning 'lp: no sync-backed path configured — cross-machine visibility unavailable. (Suppress with -NoSyncBackedWarning)'
-        }
-        return $null
+        return @{ path = $null; notice = 'No sync-backed path configured — cross-machine visibility unavailable. (Suppress with -NoSyncBackedWarning)' }
     }
     return checkSyncPath (& $configScript)
 }
 
-function checkSyncPath {
-    [CmdletBinding()] param($path)
-    if (-not $path) { return $null }
+function checkSyncPath($path) {
+    if (-not $path) { return @{ path = $null; notice = $null } }
     if (-not (Test-Path $path)) {
-        if (-not $NoSyncBackedWarning) {
-            Write-Warning "lp: configured sync path '$path' does not exist — cross-machine visibility unavailable."
-        }
-        return $null
+        return @{ path = $null; notice = "Configured sync path '$path' does not exist — cross-machine visibility unavailable." }
     }
-    return $path
+    return @{ path = $path; notice = $null }
 }
 
 # --- Helpers ---

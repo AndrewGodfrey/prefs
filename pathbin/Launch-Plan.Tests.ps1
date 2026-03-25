@@ -119,6 +119,37 @@ Describe "resolveSessionIds" {
         @($db[0].sessionIds) | Should -HaveCount 1
     }
 
+    It "assigns untracked session to the only unoccupied cwd-matching entry" {
+        $rDir = "TestDrive:\running-unoccupied"
+        $null = New-Item -ItemType Directory $rDir
+        '{"session_id":"live-sid","cwd":"C:/de"}' | Set-Content "$rDir\pid_99.txt"
+        '{"session_id":"new-sid","cwd":"C:/de"}'  | Set-Content "$rDir\pid_100.txt"
+        $entry1 = [pscustomobject]@{planFile = "f1.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @("live-sid")}
+        $entry2 = [pscustomobject]@{planFile = "f2.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
+        $db = @($entry1, $entry2)
+
+        $result = resolveSessionIds $db $rDir @(99, 100)
+
+        @($entry1.sessionIds) | Should -HaveCount 1     # live-sid not duplicated
+        $entry2.sessionIds    | Should -Contain "new-sid"
+        $result.orphans       | Should -Not -Contain "new-sid"
+    }
+
+    It "treats session as orphan when cwd matches multiple entries" {
+        $rDir = "TestDrive:\running-ambig"
+        $null = New-Item -ItemType Directory $rDir
+        '{"session_id":"new-sid","cwd":"C:/de"}' | Set-Content "$rDir\pid_99.txt"
+        $entry1 = [pscustomobject]@{planFile = "f1.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
+        $entry2 = [pscustomobject]@{planFile = "f2.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
+        $db = @($entry1, $entry2)
+
+        $result = resolveSessionIds $db $rDir @(99)
+
+        @($entry1.sessionIds) | Should -HaveCount 0
+        @($entry2.sessionIds) | Should -HaveCount 0
+        $result.orphans        | Should -Contain "new-sid"
+    }
+
     It "doesn't add session_id when cwd doesn't match" {
         $rDir = "TestDrive:\running-nomatch"
         $null = New-Item -ItemType Directory $rDir
@@ -165,17 +196,17 @@ Describe "resolveSessionIds" {
         $result.orphans | Should -Contain "orphan-sid"
     }
 
-    It "warns on conflict when session_id is already linked to a different entry" {
+    It "does not flag a notice when session_id is already correctly linked by ID" {
         $rDir = "TestDrive:\running-conflict"
         $null = New-Item -ItemType Directory $rDir
-        # pid file says cwd=C:/other, but "conflict-sid" is already in entry for C:/de
+        # pid file cwd matches entry2, but session is already recorded under entry1 by ID
         '{"session_id":"conflict-sid","cwd":"C:/other"}' | Set-Content "$rDir\pid_99.txt"
         $entry1 = [pscustomobject]@{planFile = "f1.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @("conflict-sid")}
         $entry2 = [pscustomobject]@{planFile = "f2.md"; state = "discussing"; cwd = "C:/other"; sessionIds = @()}
         $db = @($entry1, $entry2)
 
-        resolveSessionIds $db $rDir @(99) -WarningVariable warns
-        $warns | Should -Not -BeNullOrEmpty
+        $result = resolveSessionIds $db $rDir @(99)
+        $result.notices | Should -BeNullOrEmpty
     }
 
     It "returns liveSessionIds set" {
@@ -301,27 +332,29 @@ Describe "checkSyncPath" {
 
         $result = checkSyncPath (Resolve-Path $dir).Path
 
-        $result | Should -Not -BeNullOrEmpty
+        $result.path   | Should -Not -BeNullOrEmpty
+        $result.notice | Should -BeNullOrEmpty
     }
 
-    It "returns null and warns when path does not exist" {
-        $result = checkSyncPath "TestDrive:\sync-missing" -WarningVariable warns
+    It "returns null path and notice when path does not exist" {
+        $result = checkSyncPath "TestDrive:\sync-missing"
 
-        $result           | Should -BeNull
-        $warns            | Should -Not -BeNullOrEmpty
+        $result.path   | Should -BeNull
+        $result.notice | Should -Not -BeNullOrEmpty
     }
 
-    It "returns null when path is null" {
+    It "returns null path and no notice when path is null" {
         $result = checkSyncPath $null
 
-        $result | Should -BeNull
+        $result.path   | Should -BeNull
+        $result.notice | Should -BeNullOrEmpty
     }
 }
 
 Describe "openProject" {
     BeforeEach {
         Mock saveDb { }
-        Mock launchCl { }
+        Mock launchCl { return 0 }
         Mock Write-Host { }
     }
 
@@ -379,7 +412,7 @@ Describe "openProject" {
         $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "in-progress"; cwd = "C:/de"; sessionIds = @("sid1")}
         $db.Add($entry)
         $script:capturedArgs = $null
-        Mock launchCl { $script:capturedArgs = $args }
+        Mock launchCl { $script:capturedArgs = $args; return 0 }
 
         openProject $db $entry @()
 
@@ -393,12 +426,39 @@ Describe "openProject" {
         $db.Add($entry)
         Mock Read-Host { "0" }
         $script:capturedArgs = $null
-        Mock launchCl { $script:capturedArgs = $args }
+        Mock launchCl { $script:capturedArgs = $args; return 0 }
 
         openProject $db $entry @()
 
         @($entry.sessionIds)        | Should -Be @("sid1")
         $script:capturedArgs        | Should -Contain "--resume"
+    }
+
+    It "ready + cl fails: returns false" {
+        $db    = [System.Collections.Generic.List[object]]::new()
+        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "ready"; cwd = "C:/de"; sessionIds = @()}
+        $db.Add($entry)
+        Mock launchCl { return 1 }
+        Mock Read-Host { "" }
+
+        $result = openProject $db $entry @()
+
+        $result | Should -BeFalse
+    }
+
+    It "non-ready + resume fails: clears session_ids, saves db twice, returns false" {
+        $db    = [System.Collections.Generic.List[object]]::new()
+        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "in-progress"; cwd = "C:/de"; sessionIds = @("expired-sid")}
+        $db.Add($entry)
+        Mock launchCl { return 1 }
+        Mock clearConsole { }
+        Mock Read-Host { "" }
+
+        $result = openProject $db $entry @()
+
+        $result              | Should -BeFalse
+        @($entry.sessionIds) | Should -HaveCount 0
+        Should -Invoke saveDb -Times 2
     }
 }
 
@@ -515,6 +575,42 @@ Describe "registerProject" {
 
         @($entry.sessionIds) | Should -HaveCount 0
         Should -Invoke saveDb -Times 0
+    }
+}
+
+Describe "getAvailablePlanFiles" {
+    BeforeAll {
+        $script:plansDir = (New-Item -ItemType Directory "TestDrive:\plans-avail").FullName
+        $null = New-Item -ItemType Directory "$script:plansDir/done"
+        $null = New-Item -ItemType Directory "$script:plansDir/sub"
+        $null = New-Item -ItemType Directory "$script:plansDir/sub/done"
+        Set-Content "$script:plansDir/active.md"          ""
+        Set-Content "$script:plansDir/sub/nested.md"      ""
+        Set-Content "$script:plansDir/done/archived.md"   ""
+        Set-Content "$script:plansDir/foo_done.md"        ""
+        Set-Content "$script:plansDir/sub/done/deep.md"   ""
+        Set-Content "$script:plansDir/sub/bar_done.md"    ""
+    }
+
+    It "returns top-level and nested .md files" {
+        $result = getAvailablePlanFiles $script:plansDir
+        $names = $result | ForEach-Object { Split-Path $_ -Leaf }
+        $names | Should -Contain 'active.md'
+        $names | Should -Contain 'nested.md'
+    }
+
+    It "excludes files under a done/ folder" {
+        $result = getAvailablePlanFiles $script:plansDir
+        $names = $result | ForEach-Object { Split-Path $_ -Leaf }
+        $names | Should -Not -Contain 'archived.md'
+        $names | Should -Not -Contain 'deep.md'
+    }
+
+    It "excludes files whose name ends with _done" {
+        $result = getAvailablePlanFiles $script:plansDir
+        $names = $result | ForEach-Object { Split-Path $_ -Leaf }
+        $names | Should -Not -Contain 'foo_done.md'
+        $names | Should -Not -Contain 'bar_done.md'
     }
 }
 
