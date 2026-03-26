@@ -323,6 +323,28 @@ Describe "getCrossMachineFlags" {
 
         $flags | Should -Not -Contain "C:/plans/own.md"
     }
+
+    It "ignores entries whose lastSeen is older than 7 days" {
+        $syncDir = "TestDrive:\cross-stale"
+        $null = New-Item -ItemType Directory "$syncDir/.plan-tracking" -Force
+        @{machine = "other-pc"; plans = @("C:/plans/stale.md"); lastSeen = (Get-Date).AddDays(-8).ToString('o')} |
+            ConvertTo-Json | Set-Content "$syncDir/.plan-tracking/other-pc.json"
+
+        $flags = getCrossMachineFlags $syncDir
+
+        $flags | Should -Not -Contain "C:/plans/stale.md"
+    }
+
+    It "includes entries whose lastSeen is within 7 days" {
+        $syncDir = "TestDrive:\cross-recent"
+        $null = New-Item -ItemType Directory "$syncDir/.plan-tracking" -Force
+        @{machine = "other-pc"; plans = @("C:/plans/recent.md"); lastSeen = (Get-Date).AddDays(-1).ToString('o')} |
+            ConvertTo-Json | Set-Content "$syncDir/.plan-tracking/other-pc.json"
+
+        $flags = getCrossMachineFlags $syncDir
+
+        $flags | Should -Contain "C:/plans/recent.md"
+    }
 }
 
 Describe "checkSyncPath" {
@@ -633,5 +655,129 @@ Describe "getPlanTitle" {
     It "ignores ## subheadings before the first # heading" {
         Set-Content "TestDrive:\title4.md" @("## Sub", "# Real Title")
         getPlanTitle (Get-Item "TestDrive:\title4.md").FullName | Should -Be 'Real Title'
+    }
+}
+
+Describe "pickSessionId" {
+    BeforeEach {
+        Mock Write-Host { }
+        Mock Read-Host { "" }
+    }
+
+    It "returns null when sessionIds is empty" {
+        $entry = [pscustomobject]@{sessionIds = @()}
+
+        pickSessionId $entry | Should -BeNull
+    }
+
+    It "returns the single ID without prompting" {
+        $entry = [pscustomobject]@{sessionIds = @("sid-abc")}
+
+        pickSessionId $entry | Should -Be "sid-abc"
+        Should -Invoke Read-Host -Times 0
+    }
+
+    It "returns the chosen ID for valid multi-session input" {
+        $entry = [pscustomobject]@{sessionIds = @("sid-0", "sid-1")}
+        Mock Read-Host { "1" }
+
+        pickSessionId $entry | Should -Be "sid-1"
+    }
+
+    It "re-prompts on non-integer input, then returns correct ID" {
+        $entry = [pscustomobject]@{sessionIds = @("sid-0", "sid-1")}
+        $script:pickCallCount = 0
+        Mock Read-Host { if ($script:pickCallCount++ -eq 0) { "abc" } else { "0" } }
+
+        pickSessionId $entry | Should -Be "sid-0"
+        Should -Invoke Read-Host -Times 2
+    }
+
+    It "re-prompts on out-of-range integer, then returns correct ID" {
+        $entry = [pscustomobject]@{sessionIds = @("sid-0", "sid-1")}
+        $script:pickCallCount = 0
+        Mock Read-Host { if ($script:pickCallCount++ -eq 0) { "5" } else { "1" } }
+
+        pickSessionId $entry | Should -Be "sid-1"
+        Should -Invoke Read-Host -Times 2
+    }
+}
+
+Describe "openUntracked" {
+    BeforeEach {
+        Mock saveDb { }
+        Mock Write-Host { }
+        Mock Read-Host { "" }
+        Mock launchCl { return 0 }
+        Mock clearConsole { }
+        Mock getPlansDir { return "C:/plans" }
+        Mock getAvailablePlanFiles { return @("C:/plans/foo.md") }
+        Mock pickFromList { return 0 }
+        Mock readStateKey { return [pscustomobject]@{Key = 'D'} }
+    }
+
+    It "returns false when no plans directory configured" {
+        $db = [System.Collections.Generic.List[object]]::new()
+        Mock getPlansDir { return $null }
+
+        $result = openUntracked $db
+
+        $result | Should -BeFalse
+        Should -Invoke launchCl -Times 0
+    }
+
+    It "returns false when no untracked plans remain" {
+        $db    = [System.Collections.Generic.List[object]]::new()
+        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
+        $db.Add($entry)
+
+        $result = openUntracked $db
+
+        $result | Should -BeFalse
+        Should -Invoke launchCl -Times 0
+    }
+
+    It "returns false when user cancels plan selection" {
+        $db = [System.Collections.Generic.List[object]]::new()
+        Mock pickFromList { return $null }
+
+        $result = openUntracked $db
+
+        $result | Should -BeFalse
+        Should -Invoke launchCl -Times 0
+    }
+
+    It "discussing state: adds entry with correct state, clears console, launches, returns true" {
+        $db = [System.Collections.Generic.List[object]]::new()
+
+        $result = openUntracked $db
+
+        $result         | Should -BeTrue
+        $db.Count       | Should -Be 1
+        $db[0].state    | Should -Be "discussing"
+        $db[0].planFile | Should -Be "C:/plans/foo.md"
+        Should -Invoke clearConsole -Times 1
+        Should -Invoke launchCl    -Times 1
+        Should -Invoke saveDb      -Times 1
+    }
+
+    It "ready state: transitions to in-progress, launches, returns true" {
+        $db = [System.Collections.Generic.List[object]]::new()
+        Mock readStateKey { return [pscustomobject]@{Key = 'R'} }
+
+        $result = openUntracked $db
+
+        $result      | Should -BeTrue
+        $db[0].state | Should -Be "in-progress"
+        Should -Invoke launchCl -Times 1
+    }
+
+    It "returns false when cl fails" {
+        $db = [System.Collections.Generic.List[object]]::new()
+        Mock launchCl { return 1 }
+
+        $result = openUntracked $db
+
+        $result | Should -BeFalse
     }
 }

@@ -227,7 +227,8 @@ function launchCl([string] $cwd) {
     }
 }
 
-function clearConsole { [Console]::Clear() }  # thin wrapper so tests can mock it
+function clearConsole { [Console]::Clear() }    # thin wrapper so tests can mock it
+function readStateKey  { [Console]::ReadKey($true) }  # thin wrapper so tests can mock it
 
 function showLaunchError([int] $exitCode) {
     # Note: no console clear here — cl's own output is already visible; clearing would erase it.
@@ -244,8 +245,14 @@ function pickSessionId($entry) {
 
     Write-Host 'Multiple sessions — pick one:'
     for ($i = 0; $i -lt $ids.Count; $i++) { Write-Host "  [$i] $($ids[$i])" }
-    $choice = Read-Host 'Number'
-    return $ids[[int]$choice]
+    while ($true) {
+        $choice = Read-Host 'Number'
+        $n = 0
+        if ([int]::TryParse($choice, [ref]$n) -and $n -ge 0 -and $n -lt $ids.Count) {
+            return $ids[$n]
+        }
+        Write-Host "  Enter a number between 0 and $($ids.Count - 1)" -ForegroundColor Red
+    }
 }
 
 function getAvailablePlanFiles([string] $plansDir) {
@@ -265,7 +272,7 @@ function openUntracked($db) {
     if (-not $plansDir) {
         Write-Host 'No plans directory configured — cannot open untracked plans.' -ForegroundColor Yellow
         $null = Read-Host 'Press Enter to return'
-        return
+        return $false
     }
     $openPlans = @($db | ForEach-Object { $_.planFile })
     $available = @(getAvailablePlanFiles $plansDir |
@@ -274,7 +281,7 @@ function openUntracked($db) {
     if ($available.Count -eq 0) {
         Write-Host 'No unopen plans found.' -ForegroundColor Yellow
         $null = Read-Host 'Press Enter to return'
-        return
+        return $false
     }
 
     $base       = normalizePath $plansDir
@@ -290,7 +297,7 @@ function openUntracked($db) {
 
     Write-Host ''
     Write-Host 'Initial state:  [D] Discussing (default)  [I] In-progress  [R] Ready'
-    $key = [Console]::ReadKey($true)
+    $key = readStateKey
     $state = switch ($key.Key) { 'I' { 'in-progress' } 'R' { 'ready' } default { 'discussing' } }
 
     $entry = [pscustomobject]@{
@@ -301,7 +308,7 @@ function openUntracked($db) {
     }
     $db.Add($entry)
 
-    [Console]::Clear()
+    clearConsole
     if ($state -eq 'ready') {
         $entry.state = 'in-progress'
         saveDb $db $dbPath
@@ -502,11 +509,17 @@ function getCrossMachineFlags([string] $syncPath) {
     if (-not $syncPath) { return @() }
     $trackingDir = "$syncPath/.plan-tracking"
     if (-not (Test-Path $trackingDir)) { return @() }
+    $cutoff  = (Get-Date).AddDays(-7)
     $flagged = @()
     foreach ($file in Get-ChildItem $trackingDir -Filter '*.json' -ErrorAction SilentlyContinue) {
         if ($file.BaseName -eq $env:COMPUTERNAME) { continue }
         $other = Get-Content $file.FullName -Raw | ConvertFrom-Json -ErrorAction SilentlyContinue
-        if ($other -and $other.plans) { $flagged += @($other.plans) }
+        if (-not $other -or -not $other.plans) { continue }
+        # If lastSeen is present and older than 7 days, treat as stale — skip.
+        # Missing lastSeen (older format) is treated as recent for backward compatibility.
+        $lastSeenDt = [datetime]::MinValue
+        if ($other.lastSeen -and [datetime]::TryParse($other.lastSeen, [ref]$lastSeenDt) -and $lastSeenDt -lt $cutoff) { continue }
+        $flagged += @($other.plans)
     }
     return $flagged
 }
