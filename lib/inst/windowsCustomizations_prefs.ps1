@@ -51,7 +51,7 @@ function installWindowsTerminalCustomization($stage) {
 
     $content = Import-TextFile $settingsFile
     $content = customizeTerminal $content $settingsFile
-    Install-TextToFile $stage $settingsFile $content -BackupFile
+    Install-JsonToFile $stage $settingsFile $content -BackupFile
 }
 
 # --- Terminal customization (JSON-tools based) ---
@@ -75,8 +75,11 @@ function customizeTerminal([string] $content, [string] $filename, [string] $bgCo
     $content = Move-JsonArrayElementToFirst $content @("profiles", "list", "[@guid='$(getGuid_PsElevatedProfile)']") $filename
     $content = Move-JsonArrayElementToFirst $content @("profiles", "list", "[@guid='$(getGuid_PsProfile)']")        $filename
 
-    $content = Update-JsonSection $content @("actions", "[@keys='shift+enter']")    (buildShiftEnterKeybinding)    $filename
-    $content = Update-JsonSection $content @("actions", "[@keys='ctrl+backspace']") (buildCtrlBackspaceKeybinding) $filename
+    # Keybindings use Terminal's split format: actions (by id) + keybindings (id→keys mapping)
+    $content = Update-JsonSection $content @("actions",     "[@id='User.sendInput.DFCDAF06']") (buildShiftEnterAction)        $filename
+    $content = Update-JsonSection $content @("keybindings", "[@id='User.sendInput.DFCDAF06']") (buildShiftEnterKeybinding)    $filename
+    $content = Update-JsonSection $content @("actions",     "[@id='User.sendInput.817164EE']") (buildCtrlBackspaceAction)     $filename
+    $content = Update-JsonSection $content @("keybindings", "[@id='User.sendInput.817164EE']") (buildCtrlBackspaceKeybinding) $filename
 
     return $content
 }
@@ -124,11 +127,29 @@ function buildPsProfileSection([string] $bgColor) {
     ) -join "`n"
 }
 
-function buildShiftEnterKeybinding {
+function buildShiftEnterAction {
     return @(
         '        {'
         '            "command": { "action": "sendInput", "input": "\u000A" },'
+        '            "id": "User.sendInput.DFCDAF06"'
+        '        }'
+    ) -join "`n"
+}
+
+function buildShiftEnterKeybinding {
+    return @(
+        '        {'
+        '            "id": "User.sendInput.DFCDAF06",'
         '            "keys": "shift+enter"'
+        '        }'
+    ) -join "`n"
+}
+
+function buildCtrlBackspaceAction {
+    return @(
+        '        {'
+        '            "command": { "action": "sendInput", "input": "\u0017" },'
+        '            "id": "User.sendInput.817164EE"'
         '        }'
     ) -join "`n"
 }
@@ -136,7 +157,7 @@ function buildShiftEnterKeybinding {
 function buildCtrlBackspaceKeybinding {
     return @(
         '        {'
-        '            "command": { "action": "sendInput", "input": "\u0017" },'
+        '            "id": "User.sendInput.817164EE",'
         '            "keys": "ctrl+backspace"'
         '        }'
     ) -join "`n"

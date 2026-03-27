@@ -16,7 +16,8 @@ Describe "customizeTerminal" {
             "        `"defaults`": {},`n" +
             "        `"list`": []`n" +
             "    },`n" +
-            "    `"actions`": []`n" +
+            "    `"actions`": [],`n" +
+            "    `"keybindings`": []`n" +
             "}"
     }
 
@@ -87,22 +88,30 @@ Describe "customizeTerminal" {
         $list[1]['guid'] | Should -Be (getGuid_PsElevatedProfile)
     }
 
-    It "adds shift+enter keybinding to send a newline" {
+    It "adds shift+enter and ctrl+backspace actions" {
         $result = customizeTerminal $script:baseJson $script:filename "#1F2233"
-        $binding = (ConvertFrom-Json $result -AsHashtable).actions |
-                   Where-Object { $_['keys'] -eq 'shift+enter' }
-        $binding                      | Should -Not -BeNull
-        $binding['command']['action'] | Should -Be "sendInput"
-        $binding['command']['input']  | Should -Be "`n"
+        $actions = (ConvertFrom-Json $result -AsHashtable).actions
+
+        $shiftEnter = $actions | Where-Object { $_['id'] -eq 'User.sendInput.DFCDAF06' }
+        $shiftEnter                    | Should -Not -BeNull
+        $shiftEnter['command'].action  | Should -Be 'sendInput'
+
+        $ctrlBackspace = $actions | Where-Object { $_['id'] -eq 'User.sendInput.817164EE' }
+        $ctrlBackspace                    | Should -Not -BeNull
+        $ctrlBackspace['command'].action  | Should -Be 'sendInput'
     }
 
-    It "adds ctrl+backspace keybinding to send ctrl+w (delete word)" {
+    It "adds shift+enter and ctrl+backspace keybindings" {
         $result = customizeTerminal $script:baseJson $script:filename "#1F2233"
-        $binding = (ConvertFrom-Json $result -AsHashtable).actions |
-                   Where-Object { $_['keys'] -eq 'ctrl+backspace' }
-        $binding                      | Should -Not -BeNull
-        $binding['command']['action'] | Should -Be "sendInput"
-        $binding['command']['input']  | Should -Be ([char]0x17).ToString()
+        $keybindings = (ConvertFrom-Json $result -AsHashtable).keybindings
+
+        $shiftEnter = $keybindings | Where-Object { $_['id'] -eq 'User.sendInput.DFCDAF06' }
+        $shiftEnter            | Should -Not -BeNull
+        $shiftEnter['keys']    | Should -Be 'shift+enter'
+
+        $ctrlBackspace = $keybindings | Where-Object { $_['id'] -eq 'User.sendInput.817164EE' }
+        $ctrlBackspace         | Should -Not -BeNull
+        $ctrlBackspace['keys'] | Should -Be 'ctrl+backspace'
     }
 
     It "is idempotent: running twice produces the same result" {
