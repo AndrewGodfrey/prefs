@@ -14,30 +14,51 @@ function Set-PowerToysEnabledModules([string] $content, [string[]] $keepEnabled,
     return $content
 }
 
-function Get-AppliedLayoutsFromEditorParams([hashtable] $editorParams, [hashtable[]] $layouts) {
-    $monitors = $editorParams.monitors | Sort-Object { [int]$_['left-coordinate'] }
-    $entries = @()
-    for ($i = 0; $i -lt [Math]::Min($monitors.Count, $layouts.Count); $i++) {
-        $mon    = $monitors[$i]
-        $layout = $layouts[$i]
-        $entries += [ordered]@{
-            device = [ordered]@{
-                'monitor'          = $mon['monitor']
-                'monitor-instance' = $mon['monitor-instance-id']
-                'monitor-number'   = $mon['monitor-number']
-                'serial-number'    = $mon['monitor-serial-number']
-                'virtual-desktop'  = $mon['virtual-desktop']
-            }
-            'applied-layout' = [ordered]@{
-                uuid                = $layout['uuid']
-                type                = 'custom'
-                'show-spacing'      = $false
-                spacing             = 0
-                'zone-count'        = $layout['zone-count']
-                'sensitivity-radius' = 20
-            }
+function New-AppliedLayoutEntry($mon, $layout) {
+    return [ordered]@{
+        device = [ordered]@{
+            'monitor'          = $mon['monitor']
+            'monitor-instance' = $mon['monitor-instance-id']
+            'monitor-number'   = $mon['monitor-number']
+            'serial-number'    = $mon['monitor-serial-number']
+            'virtual-desktop'  = $mon['virtual-desktop']
+        }
+        'applied-layout' = [ordered]@{
+            uuid                = $layout['uuid']
+            type                = 'custom'
+            'show-spacing'      = $false
+            spacing             = 0
+            'zone-count'        = $layout['zone-count']
+            'sensitivity-radius' = 20
         }
     }
+}
+
+# Build applied-layouts by assigning layouts to monitors by position (left-coordinate order).
+# Merges with existing entries: monitors in editor-parameters get layouts by position;
+# existing entries for monitors not in editor-parameters are preserved as-is.
+function Get-AppliedLayoutsFromEditorParams([hashtable] $editorParams, [hashtable[]] $layouts, [hashtable[]] $existingEntries = @()) {
+    $monitors = @($editorParams.monitors | Sort-Object { [int]$_['left-coordinate'] })
+
+    $entries = @()
+
+    # Build set of instance IDs that get a fresh layout assignment
+    $assignedInstanceIds = @{}
+    for ($i = 0; $i -lt [Math]::Min($monitors.Count, $layouts.Count); $i++) {
+        $assignedInstanceIds[$monitors[$i]['monitor-instance-id']] = $true
+        $entries += New-AppliedLayoutEntry $monitors[$i] $layouts[$i]
+    }
+
+    # Preserve existing entries for monitors that didn't get a fresh assignment:
+    # - monitors in editor-parameters beyond the layout count (e.g. 3rd monitor with only 2 layouts)
+    # - monitors from other locations not in editor-parameters at all
+    foreach ($existing in $existingEntries) {
+        $instanceId = $existing.device['monitor-instance']
+        if (-not $assignedInstanceIds.ContainsKey($instanceId)) {
+            $entries += $existing
+        }
+    }
+
     return [ordered]@{ 'applied-layouts' = $entries }
 }
 
@@ -53,7 +74,7 @@ PowerToys settings file not found. Launch PowerToys once to create it, then re-r
     } else {
         $content = Import-TextFile $settingsFile
         $content = Set-PowerToysEnabledModules $content @("FancyZones") $settingsFile
-        Install-TextToFile $stage $settingsFile $content -BackupFile
+        Install-JsonToFile $stage $settingsFile $content -BackupFile
     }
 
     $installationTracker.EndStage($stage)
@@ -67,15 +88,21 @@ PowerToys settings file not found. Launch PowerToys once to create it, then re-r
 FancyZones editor-parameters.json not found. Open the FancyZones editor (Win+`) once, then re-run deploy.
 "@)
     } else {
-        Install-TextToFile $stage2 "$fancyZonesDir\custom-layouts.json" (Get-Content -Raw "$PSScriptRoot\fancyZones\custom-layouts.json") -BackupFile
+        Install-JsonToFile $stage2 "$fancyZonesDir\custom-layouts.json" (Get-Content -Raw "$PSScriptRoot\fancyZones\custom-layouts.json") -BackupFile
 
         $editorParams = ConvertFrom-Json (Get-Content -Raw $editorParamsFile) -AsHashtable
         $layouts = @(
             @{ uuid = '{72207334-72A3-4AB6-83FE-01FEE336F1FA}'; 'zone-count' = 1 },  # fullscreen (left monitor)
             @{ uuid = '{C00E7BB8-D784-447F-8C0E-B00E3564C6D3}'; 'zone-count' = 3 }   # agent (right monitor)
         )
-        $appliedLayouts = Get-AppliedLayoutsFromEditorParams $editorParams $layouts
-        Install-TextToFile $stage2 "$fancyZonesDir\applied-layouts.json" (ConvertTo-Json $appliedLayouts -Depth 10) -BackupFile
+        $appliedLayoutsFile = "$fancyZonesDir\applied-layouts.json"
+        $existingEntries = @()
+        if (Test-Path $appliedLayoutsFile) {
+            $existing = ConvertFrom-Json (Get-Content -Raw $appliedLayoutsFile) -AsHashtable
+            $existingEntries = @($existing['applied-layouts'])
+        }
+        $appliedLayouts = Get-AppliedLayoutsFromEditorParams $editorParams $layouts $existingEntries
+        Install-JsonToFile $stage2 $appliedLayoutsFile (ConvertTo-Json $appliedLayouts -Depth 10) -BackupFile
     }
     $installationTracker.EndStage($stage2)
 }
