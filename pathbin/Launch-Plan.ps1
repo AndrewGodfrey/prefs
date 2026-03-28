@@ -317,7 +317,7 @@ function openUntracked($db) {
         if ($exitCode -ne 0) { return $false }
     } else {
         saveDb $db $dbPath
-        $exitCode = launchCl $entry.cwd "We're starting work on $planFile"
+        $exitCode = launchCl $entry.cwd "We're starting work on $planFile - please review, and then let's discuss next steps."
         showLaunchError $exitCode
         if ($exitCode -ne 0) { return $false }
     }
