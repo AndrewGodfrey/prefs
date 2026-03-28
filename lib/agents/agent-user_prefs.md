@@ -22,6 +22,10 @@ For implementation plan steps, suggest concluding each step with
   "run `/review-changes` and address up to 2 rounds of feedback"
 - so that agent review is done before the user review.
 
+### Toil
+
+When a tool or scanner produces known false positives, suppress them in code — don't accept repeated manual review as a substitute.
+
 ### Pacing and initiative
 
 Don't prompt for commits or ask "ready to commit?" after each response — the user signals when they're
