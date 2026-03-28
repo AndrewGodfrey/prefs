@@ -64,6 +64,15 @@ function runLauncher($db, $liveSessionIds, $orphans, $crossFlags, $notices) {
                 [Console]::Clear()
                 registerProject $db $orphans $liveSessionIds
             }
+            { $_ -in 'S', 's' } {
+                if ($db.Count -gt 0) {
+                    if (isLive $db[$selected] $liveSessionIds) {
+                        $transientError = 'Cannot change state of a live session — exit Claude first.'
+                    } else {
+                        changeState $db $db[$selected]
+                    }
+                }
+            }
             { $_ -in 'U', 'u' } {
                 if ($db.Count -gt 0) {
                     if (isLive $db[$selected] $liveSessionIds) {
@@ -109,7 +118,7 @@ function renderList($db, $selected, $liveSessionIds, $crossFlags, $notices, $tra
     }
 
     Write-Host ''
-    Write-Host '  [↑↓] navigate  [Enter] open  [O] open  [R] register  [U] unregister  [Q] quit' -ForegroundColor DarkCyan
+    Write-Host '  [↑↓] navigate  [Enter] open  [O] open  [R] register  [S] state  [U] unregister  [Q] quit' -ForegroundColor DarkCyan
 
     if ($notices -and $notices.Count -gt 0) {
         Write-Host ''
@@ -122,6 +131,26 @@ function renderList($db, $selected, $liveSessionIds, $crossFlags, $notices, $tra
 }
 
 # --- Actions ---
+
+function changeState($db, $entry) {
+    clearConsole
+    Write-Host "  Change state: $(Split-Path $entry.planFile -Leaf)" -ForegroundColor Cyan
+    Write-Host ''
+    Write-Host "  Current state: $($entry.state)"
+    Write-Host ''
+    Write-Host '  New state:  [D] Discussing  [I] In-progress  [R] Ready  [Esc] cancel'
+    $key = readStateKey
+    $newState = switch ($key.Key) {
+        'D' { 'discussing' }
+        'I' { 'in-progress' }
+        'R' { 'ready' }
+        default { $null }
+    }
+    if ($newState -and $newState -ne $entry.state) {
+        $entry.state = $newState
+        saveDb $db $dbPath
+    }
+}
 
 function openProject($db, $entry, $liveSessionIds) {
     if (isLive $entry $liveSessionIds) {

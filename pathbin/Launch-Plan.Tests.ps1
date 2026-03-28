@@ -781,3 +781,71 @@ Describe "openUntracked" {
         $result | Should -BeFalse
     }
 }
+
+Describe "changeState" {
+    BeforeEach {
+        Mock saveDb { }
+        Mock Write-Host { }
+        Mock clearConsole { }
+    }
+
+    It "D key: sets state to discussing and saves" {
+        $db    = [System.Collections.Generic.List[object]]::new()
+        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "in-progress"; cwd = "C:/de"; sessionIds = @()}
+        $db.Add($entry)
+        Mock readStateKey { return [pscustomobject]@{Key = 'D'} }
+
+        changeState $db $entry
+
+        $entry.state | Should -Be "discussing"
+        Should -Invoke saveDb -Times 1
+    }
+
+    It "I key: sets state to in-progress and saves" {
+        $db    = [System.Collections.Generic.List[object]]::new()
+        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
+        $db.Add($entry)
+        Mock readStateKey { return [pscustomobject]@{Key = 'I'} }
+
+        changeState $db $entry
+
+        $entry.state | Should -Be "in-progress"
+        Should -Invoke saveDb -Times 1
+    }
+
+    It "R key: sets state to ready and saves" {
+        $db    = [System.Collections.Generic.List[object]]::new()
+        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
+        $db.Add($entry)
+        Mock readStateKey { return [pscustomobject]@{Key = 'R'} }
+
+        changeState $db $entry
+
+        $entry.state | Should -Be "ready"
+        Should -Invoke saveDb -Times 1
+    }
+
+    It "does not save when the same state is selected" {
+        $db    = [System.Collections.Generic.List[object]]::new()
+        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "in-progress"; cwd = "C:/de"; sessionIds = @()}
+        $db.Add($entry)
+        Mock readStateKey { return [pscustomobject]@{Key = 'I'} }
+
+        changeState $db $entry
+
+        $entry.state | Should -Be "in-progress"
+        Should -Invoke saveDb -Times 0
+    }
+
+    It "does not change state or save when an unrecognized key is pressed" {
+        $db    = [System.Collections.Generic.List[object]]::new()
+        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
+        $db.Add($entry)
+        Mock readStateKey { return [pscustomobject]@{Key = 'Escape'} }
+
+        changeState $db $entry
+
+        $entry.state | Should -Be "discussing"
+        Should -Invoke saveDb -Times 0
+    }
+}
