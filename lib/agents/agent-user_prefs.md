@@ -26,6 +26,10 @@ For implementation plan steps, suggest concluding each step with
 
 When a tool or scanner produces known false positives, suppress them in code — don't accept repeated manual review as a substitute.
 
+### Wrap sequence
+
+When the user invokes `/wrap`, invoke `/wrap-pl` yourself as the final step.
+
 ### Pacing and initiative
 
 Don't prompt for commits or ask "ready to commit?" after each response — the user signals when they're
