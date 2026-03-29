@@ -20,9 +20,6 @@ function main {
 
     $notices = [System.Collections.Generic.List[string]]::new()
     foreach ($n in $resolved.notices) { $notices.Add($n) }
-    if ($resolved.orphans.Count -gt 0) {
-        $notices.Add("Untracked session(s): $($resolved.orphans -join ', ')")
-    }
 
     if (-not (getPlansDir)) { $notices.Add('No plans directory configured — O and R unavailable. Provide lib/claude/Get-PlansDir.ps1 in your de repo.') }
 
@@ -44,7 +41,7 @@ function runLauncher($db, $liveSessionIds, $orphans, $crossFlags, $notices) {
     $selected      = 0
     $transientError = $null
     while ($true) {
-        renderList $db $selected $liveSessionIds $crossFlags $notices $transientError
+        renderList $db $selected $liveSessionIds $orphans $crossFlags $notices $transientError
         $transientError = $null
         $key = [Console]::ReadKey($true)
         switch ($key.Key) {
@@ -89,7 +86,7 @@ function runLauncher($db, $liveSessionIds, $orphans, $crossFlags, $notices) {
     }
 }
 
-function renderList($db, $selected, $liveSessionIds, $crossFlags, $notices, $transientError) {
+function renderList($db, $selected, $liveSessionIds, $orphans, $crossFlags, $notices, $transientError) {
     [Console]::Clear()
     Write-Host '  Plan Launcher' -ForegroundColor Cyan
     Write-Host ''
@@ -120,9 +117,12 @@ function renderList($db, $selected, $liveSessionIds, $crossFlags, $notices, $tra
     Write-Host ''
     Write-Host '  [↑↓] navigate  [Enter] open  [O] open  [R] register  [S] state  [U] unregister  [Q] quit' -ForegroundColor DarkCyan
 
-    if ($notices -and $notices.Count -gt 0) {
+    if (($notices -and $notices.Count -gt 0) -or ($orphans -and $orphans.Count -gt 0)) {
         Write-Host ''
         foreach ($n in $notices) { Write-Host "  ⚠ $n" -ForegroundColor Yellow }
+        if ($orphans -and $orphans.Count -gt 0) {
+            Write-Host "  ⚠ Untracked session(s): $($orphans -join ', ')" -ForegroundColor Yellow
+        }
     }
     if ($transientError) {
         Write-Host ''
@@ -171,6 +171,8 @@ function openProject($db, $entry, $liveSessionIds) {
         if ($sid) {
             $entry.sessionIds = @($sid)
             saveDb $db $dbPath
+            $script:launchPrewriteSid = $sid
+            $script:launchPrewriteCwd = normalizePath $entry.cwd
             $exitCode = launchCl $entry.cwd --resume $sid
             if ($exitCode -ne 0) {
                 $entry.sessionIds = @()
@@ -236,6 +238,9 @@ function resetConsoleMode {
     [LpConsole]::SetConsoleMode($hOut, $script:savedConsoleOutMode) | Out-Null
 }
 
+$script:launchPrewriteSid = $null  # set before resume launches to pre-write the running file
+$script:launchPrewriteCwd = $null
+
 function launchCl([string] $cwd) {
     resetConsoleMode
     # Use Start-Process -NoNewWindow so the child process inherits the console directly,
@@ -246,10 +251,22 @@ function launchCl([string] $cwd) {
     $argStr   = ($args | ForEach-Object { '"' + ($_ -replace '"', '""') + '"' }) -join ' '
     $cmd      = if ($argStr) { "& cl $argStr" } else { '& cl' }
     $encoded  = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd))
-    $spParams = @{ FilePath = 'pwsh'; ArgumentList = @('-NoLogo', '-EncodedCommand', $encoded); NoNewWindow = $true; Wait = $true; PassThru = $true }
+    $spParams = @{ FilePath = 'pwsh'; ArgumentList = @('-NoLogo', '-EncodedCommand', $encoded); NoNewWindow = $true; PassThru = $true }
     if ($cwd) { $spParams.WorkingDirectory = $cwd }
     try {
         $proc = Start-Process @spParams
+        # Pre-write the running file so the session shows live immediately, before the first
+        # UserPromptSubmit hook fires. Only done for resume launches where the sid is known.
+        if ($script:launchPrewriteSid) {
+            $runDir = "$home/prat/auto/context/running"
+            $null = New-Item -ItemType Directory $runDir -Force
+            [pscustomobject]@{session_id = $script:launchPrewriteSid; cwd = $script:launchPrewriteCwd} |
+                ConvertTo-Json -Compress |
+                Set-Content "$runDir/pid_$($proc.Id).txt" -Encoding UTF8
+            $script:launchPrewriteSid = $null
+            $script:launchPrewriteCwd = $null
+        }
+        $proc.WaitForExit()
         return $proc.ExitCode
     } catch {
         return 1
