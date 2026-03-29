@@ -28,7 +28,9 @@ When a tool or scanner produces known false positives, suppress them in code —
 
 ### Wrap sequence
 
-When the user invokes `/wrap`, invoke `/wrap-pl` yourself as the final step.
+When the user invokes `/wrap`, invoke `/wrap-pl` yourself as the final step — but only once all
+open questions (including the `/reflect` conversation) are fully resolved. Don't invoke it in the
+same turn as an open question.
 
 ### Pacing and initiative
 
