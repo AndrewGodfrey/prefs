@@ -16,12 +16,6 @@ I prefer "I don't know" to guessing. Stay focused, unless there's a particular i
 
 To capture a correction, invoke the `remember` skill — it covers where to save and how to write entries.
 
-### Code review
-
-For implementation plan steps, suggest concluding each step with 
-  "run `/review-changes` and address up to 2 rounds of feedback"
-- so that agent review is done before the user review.
-
 ### Toil
 
 When a tool or scanner produces known false positives, suppress them in code — don't accept repeated manual review as a substitute.
