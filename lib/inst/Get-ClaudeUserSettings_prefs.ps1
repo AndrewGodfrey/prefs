@@ -28,17 +28,11 @@ return @{
         )
     }
     hooks = @{
-        Stop = @(
-            @{hooks = @(@{type = "command"; command = 'pwsh -c ''& "$home/prat/lib/On-AgentTurnCompleted.ps1"'''})}
-        )
         PostToolUse = @(
             @{
                 matcher = "Edit|Write"
                 hooks   = @(@{type = "command"; command = 'pwsh -c ''& "$home/prat/lib/On-PostToolUse.ps1"'''})
             }
-        )
-        UserPromptSubmit = @(
-            @{hooks = @(@{type = "command"; command = 'pwsh -c ''& "$home/prefs/lib/claude/On-UserPromptSubmit.ps1"'''})}
         )
     }
 }

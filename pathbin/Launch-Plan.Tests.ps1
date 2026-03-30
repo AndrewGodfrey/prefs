@@ -150,6 +150,35 @@ Describe "resolveSessionIds" {
         $result.orphans        | Should -Contain "new-sid"
     }
 
+    It "matches session by planFile even when cwd matches multiple entries" {
+        $rDir = "TestDrive:\running-planfile-ambig"
+        $null = New-Item -ItemType Directory $rDir
+        '{"session_id":"new-sid","cwd":"C:/de","planFile":"f1.md"}' | Set-Content "$rDir\pid_99.txt"
+        $entry1 = [pscustomobject]@{planFile = "f1.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
+        $entry2 = [pscustomobject]@{planFile = "f2.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
+        $db = @($entry1, $entry2)
+
+        $result = resolveSessionIds $db $rDir @(99)
+
+        $entry1.sessionIds    | Should -Contain "new-sid"
+        @($entry2.sessionIds) | Should -HaveCount 0
+        $result.orphans       | Should -Not -Contain "new-sid"
+        $result.liveSessionIds | Should -Contain "new-sid"
+    }
+
+    It "falls through to cwd matching when planFile doesn't match any db entry" {
+        $rDir = "TestDrive:\running-planfile-miss"
+        $null = New-Item -ItemType Directory $rDir
+        '{"session_id":"new-sid","cwd":"C:/de","planFile":"unknown.md"}' | Set-Content "$rDir\pid_99.txt"
+        $entry = [pscustomobject]@{planFile = "f1.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
+        $db = @($entry)
+
+        $result = resolveSessionIds $db $rDir @(99)
+
+        $entry.sessionIds  | Should -Contain "new-sid"   # cwd fallthrough assigns it
+        $result.orphans    | Should -Not -Contain "new-sid"
+    }
+
     It "doesn't add session_id when cwd doesn't match" {
         $rDir = "TestDrive:\running-nomatch"
         $null = New-Item -ItemType Directory $rDir
@@ -378,6 +407,8 @@ Describe "openProject" {
         Mock saveDb { }
         Mock launchCl { return 0 }
         Mock Write-Host { }
+        Mock writeLaunchIntent { }
+        Mock clearLaunchIntent { }
     }
 
     It "ready + not live: transitions to in-progress, clears sessionIds, launches" {
@@ -427,6 +458,50 @@ Describe "openProject" {
 
         $entry.cwd           | Should -Be (normalizePath $PWD.Path)
         Should -Invoke launchCl -Times 1
+    }
+
+    It "discussing + no sid: transitions state to in-progress" {
+        $db    = [System.Collections.Generic.List[object]]::new()
+        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
+        $db.Add($entry)
+
+        openProject $db $entry @()
+
+        $entry.state | Should -Be "in-progress"
+    }
+
+    It "in-progress + no sid: does not change state" {
+        $db    = [System.Collections.Generic.List[object]]::new()
+        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "in-progress"; cwd = "C:/de"; sessionIds = @()}
+        $db.Add($entry)
+
+        openProject $db $entry @()
+
+        $entry.state | Should -Be "in-progress"
+    }
+
+    It "new session launch: writes launch intent with planFile and clears it after" {
+        $db    = [System.Collections.Generic.List[object]]::new()
+        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
+        $db.Add($entry)
+        $script:capturedIntentPlanFile = $null
+        Mock writeLaunchIntent { param([string] $planFile) $script:capturedIntentPlanFile = $planFile }
+
+        openProject $db $entry @()
+
+        $script:capturedIntentPlanFile | Should -Be "C:/plans/foo.md"
+        Should -Invoke clearLaunchIntent -Times 1
+    }
+
+    It "ready + not live: writes launch intent before launching" {
+        $db    = [System.Collections.Generic.List[object]]::new()
+        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "ready"; cwd = "C:/de"; sessionIds = @()}
+        $db.Add($entry)
+
+        openProject $db $entry @()
+
+        Should -Invoke writeLaunchIntent -Times 1
+        Should -Invoke clearLaunchIntent -Times 1
     }
 
     It "non-ready + single sid: saves sid and launches resume" {
@@ -714,6 +789,8 @@ Describe "openUntracked" {
         Mock getAvailablePlanFiles { return @("C:/plans/foo.md") }
         Mock pickFromList { return 0 }
         Mock readStateKey { return [pscustomobject]@{Key = 'D'} }
+        Mock writeLaunchIntent { }
+        Mock clearLaunchIntent { }
     }
 
     It "returns false when no plans directory configured" {
@@ -779,6 +856,25 @@ Describe "openUntracked" {
         $result = openUntracked $db
 
         $result | Should -BeFalse
+    }
+
+    It "discussing state: writes and clears launch intent when launching" {
+        $db = [System.Collections.Generic.List[object]]::new()
+
+        openUntracked $db
+
+        Should -Invoke writeLaunchIntent -Times 1
+        Should -Invoke clearLaunchIntent -Times 1
+    }
+
+    It "ready state: writes and clears launch intent when launching" {
+        $db = [System.Collections.Generic.List[object]]::new()
+        Mock readStateKey { return [pscustomobject]@{Key = 'R'} }
+
+        openUntracked $db
+
+        Should -Invoke writeLaunchIntent -Times 1
+        Should -Invoke clearLaunchIntent -Times 1
     }
 }
 

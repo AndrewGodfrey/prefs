@@ -163,7 +163,9 @@ function openProject($db, $entry, $liveSessionIds) {
         $entry.sessionIds = @()
         $entry.cwd        = normalizePath $PWD.Path
         saveDb $db $dbPath
+        writeLaunchIntent $entry.planFile $entry.cwd
         $exitCode = launchCl $entry.cwd "Please do the next step in $($entry.planFile)"
+        clearLaunchIntent
         showLaunchError $exitCode
         if ($exitCode -ne 0) { return $false }
     } else {
@@ -184,8 +186,11 @@ function openProject($db, $entry, $liveSessionIds) {
             }
         } else {
             $entry.cwd = normalizePath $PWD.Path
+            if ($entry.state -eq 'discussing') { $entry.state = 'in-progress' }
             saveDb $db $dbPath
+            writeLaunchIntent $entry.planFile $entry.cwd
             $exitCode = launchCl $entry.cwd "Let's continue work on $($entry.planFile)"
+            clearLaunchIntent
             showLaunchError $exitCode
             if ($exitCode -ne 0) { return $false }
         }
@@ -358,12 +363,16 @@ function openUntracked($db) {
     if ($state -eq 'ready') {
         $entry.state = 'in-progress'
         saveDb $db $dbPath
+        writeLaunchIntent $entry.planFile $entry.cwd
         $exitCode = launchCl $entry.cwd "Please do the next step in $planFile"
+        clearLaunchIntent
         showLaunchError $exitCode
         if ($exitCode -ne 0) { return $false }
     } else {
         saveDb $db $dbPath
+        writeLaunchIntent $entry.planFile $entry.cwd
         $exitCode = launchCl $entry.cwd "We're starting work on $planFile - please review, and then let's discuss next steps."
+        clearLaunchIntent
         showLaunchError $exitCode
         if ($exitCode -ne 0) { return $false }
     }
@@ -498,6 +507,17 @@ function resolveSessionIds($entries, [string] $rDir, $livePids) {
 
         if ($sidMap.ContainsKey($data.session_id)) {
             $null = $liveSessionIds.Add($data.session_id)
+        } elseif ($data.planFile) {
+            $planEntry = $entries | Where-Object { $_.planFile -eq $data.planFile } | Select-Object -First 1
+            if ($planEntry) {
+                if ($data.session_id -notin $planEntry.sessionIds) {
+                    $planEntry.sessionIds = @($planEntry.sessionIds) + @($data.session_id)
+                }
+                $sidMap[$data.session_id] = $planEntry
+                $null = $liveSessionIds.Add($data.session_id)
+            } else {
+                $unmatched.Add($data)
+            }
         } else {
             $unmatched.Add($data)
         }
@@ -603,5 +623,16 @@ function getPlanTitle([string] $path) {
 }
 
 function normalizePath([string] $p) { $p -replace '\\', '/' }
+
+function writeLaunchIntent([string] $planFile, [string] $cwd) {
+    $null = New-Item -ItemType Directory $runningDir -Force
+    [pscustomobject]@{planFile = $planFile; cwd = $cwd} |
+        ConvertTo-Json -Compress |
+        Set-Content "$runningDir/launch_intent.json" -Encoding UTF8
+}
+
+function clearLaunchIntent {
+    Remove-Item "$runningDir/launch_intent.json" -Force -ErrorAction SilentlyContinue
+}
 
 if ($MyInvocation.InvocationName -ne '.') { main }
