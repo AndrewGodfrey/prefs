@@ -1,9 +1,9 @@
 BeforeDiscovery {
-    . "$PSScriptRoot/On-UserPromptSubmit.ps1"
+    . "$PSScriptRoot/On-UserPromptSubmit_prefs.ps1"
 }
 
 BeforeAll {
-    . "$PSScriptRoot/On-UserPromptSubmit.ps1"
+    . "$PSScriptRoot/On-UserPromptSubmit_prefs.ps1"
 }
 
 Describe "getIntentPlanFile" {
