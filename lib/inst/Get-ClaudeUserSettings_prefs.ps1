@@ -34,8 +34,5 @@ return @{
                 hooks   = @(@{type = "command"; command = 'pwsh -c ''& "$home/prat/lib/On-PostToolUse.ps1"'''})
             }
         )
-        UserPromptSubmit = @(
-            @{hooks = @(@{type = "command"; command = 'pwsh -c ''& "$home/prefs/lib/claude/On-UserPromptSubmit.ps1"'''})}
-        )
     }
 }
