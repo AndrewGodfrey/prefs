@@ -42,11 +42,12 @@ function Get-AppliedLayoutsFromEditorParams([hashtable] $editorParams, [hashtabl
 
     $entries = @()
 
-    # Build set of instance IDs that get a fresh layout assignment
+    # Assign layouts to the rightmost monitors (skipping extras on the left, e.g. laptop screen)
     $assignedInstanceIds = @{}
+    $offset = [Math]::Max(0, $monitors.Count - $layouts.Count)
     for ($i = 0; $i -lt [Math]::Min($monitors.Count, $layouts.Count); $i++) {
-        $assignedInstanceIds[$monitors[$i]['monitor-instance-id']] = $true
-        $entries += New-AppliedLayoutEntry $monitors[$i] $layouts[$i]
+        $assignedInstanceIds[$monitors[$offset + $i]['monitor-instance-id']] = $true
+        $entries += New-AppliedLayoutEntry $monitors[$offset + $i] $layouts[$i]
     }
 
     # Preserve existing entries for monitors that didn't get a fresh assignment:
