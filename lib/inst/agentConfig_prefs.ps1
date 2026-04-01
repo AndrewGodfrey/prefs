@@ -17,8 +17,15 @@ if ('installHomeClaudeMd' -notin $Suppress) {
     Install-ClaudeUserConfig $stage "$home\prefs\lib\agents\agent-user_prefs.md"
 }
 
-# Global skills, agents, and commands from prat.
-Install-ClaudeSkillSet $stage @("testing", "working-with-git", "remember", "plan-format", "prat-run-tests", "run-tests") "$home\prat\lib\agents\skills" "$home/.claude/skills"
+# Global skills from prat, prefs, and (when present) de.
+$skillSources = @(
+    @{ set = @("testing", "working-with-git", "remember", "plan-format", "prat-run-tests", "run-tests"); srcDir = "$home\prat\lib\agents\skills" }
+    @{ set = @("kql-techniques"); srcDir = "$home\prefs\lib\agents\skills" }
+)
+if ($Config.deSkillSources) {
+    $skillSources += $Config.deSkillSources
+}
+Install-ClaudeSkillSet $stage $skillSources "$home/.claude/skills"
 Install-ClaudeMarkdownFiles $stage "$home\prat\lib\agents\subagents" "$home/.claude/agents" -Cleanup
 Install-ClaudeMarkdownFiles $stage "$home\prat\lib\agents\commands" "$home/.claude/commands"
 Install-ClaudeMarkdownFiles $stage "$home\prefs\lib\agents\commands" "$home/.claude/commands"
