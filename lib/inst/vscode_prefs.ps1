@@ -1,4 +1,24 @@
 param($installationTracker, [string[]] $Suppress = @())
+
+# Replaces a scalar JSON property value, preserving indentation and trailing comma.
+# If the key is not found, returns $content unchanged.
+function setVscodeJsonPropertyValue([string] $content, [string[]] $pathArray, [string] $newJsonValue, [string] $filename) {
+    $range = Find-JsonSection $content $pathArray $filename
+    if ($null -eq $range) { return $content }
+
+    $line  = ((ConvertTo-UnixLineEndings $content) -split "`n")[$range.idxFirst]
+    $indent        = [regex]::Match($line, '^\s*').Value
+    $key           = [regex]::Match($line, '"([^"]+)"\s*:').Groups[1].Value
+    $trailingComma = if ($line.TrimEnd().EndsWith(',')) { ',' } else { '' }
+    return Format-ReplaceLines $content $range "$indent`"$key`": $newJsonValue$trailingComma"
+}
+
+function setVscodeColorTheme([string] $content, [string] $filename) {
+    return setVscodeJsonPropertyValue $content @("workbench.colorTheme") "`"Dark Modern`"" $filename
+}
+
+if ($MyInvocation.InvocationName -eq ".") { return }
+
 $stage = $installationTracker.StartStage('vscode')
 
 Install-WingetPackage $stage "Microsoft.VisualStudioCode" "$env:localappdata\Programs\Microsoft VS Code" `
@@ -14,6 +34,14 @@ Sync settings:
 - Now... wait. It will slowly sync settings and install extensions. It will prompt to reload the window sometimes.
 - It seems like maybe if I close and reopen the app, it loads more installed extensions than it did before.
 "@) }
+
+# Enforce color theme — VS Code extensions sometimes overwrite this.
+$settingsFile = "$env:appdata\Code\User\settings.json"
+if (Test-Path $settingsFile) {
+    $content = Import-TextFile $settingsFile
+    $content = setVscodeColorTheme $content $settingsFile
+    Install-JsonToFile $stage $settingsFile $content -BackupFile
+}
 
 <#
 Here's a best-effort list of extensions and settings I set up ... which are now synced...
