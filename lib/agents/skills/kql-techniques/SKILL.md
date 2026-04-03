@@ -126,3 +126,24 @@ extracting from a specific message format:
 
 Limitation: less useful when a single query handles multiple message formats — you'd filter out
 the rows that match a different pattern.
+
+
+## Timespan arithmetic
+
+`todouble(timespan)` returns **ticks** (1 tick = 100 ns). Common conversion constants:
+- Minutes: `todouble(ts) / 600000000.0` (or simpler: `ts / 1m`)
+- Hours: `todouble(ts) / 36000000000.0` (or: `ts / 1h`)
+
+Prefer the `ts / 1m` form — it's a native Kusto timespan division that returns a double directly,
+no `todouble()` needed, and no magic constants to get wrong.
+
+
+## `project` vs `project-reorder` for MCP/API consumption
+
+`project-reorder` keeps all columns (reordering the named ones to the front). This is useful for
+**human exploration in ADX** — e.g. `| take 5 | project-reorder ImportantCol1, ImportantCol2` to
+see key columns first while still discovering what other columns exist.
+
+For **queries whose results will be consumed by an MCP tool or API** (where all columns are
+returned as data), use `project` with an explicit column list instead. Otherwise, tide tables can produce multi-MB
+responses that overwhelm context.
