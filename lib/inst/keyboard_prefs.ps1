@@ -29,14 +29,17 @@ $path = "HKCU:\Control Panel\Accessibility\Keyboard Response"
 #   "DelayBeforeAcceptance"="1000"
 #   "Flags"="126"
 
-
-# Here's what the "Keyboard Properties" UI sets. I'm not sure if this matters, for now I'm ignoring it.
-#
-#   HKCU\Control Panel\Keyboard\KeyboardSpeed  Type: REG_SZ, Length: 6, Data: 24
-#   HKCU\Control Panel\Keyboard\KeyboardDelay  Type: REG_SZ, Length: 4, Data: 1
+$isWin10 = [System.Environment]::OSVersion.Version.Build -lt 22000
+if ($isWin10) {
+    Install-RegistryStringValue $stage $path "AutoRepeatRate" "500"
+} else {
+    Install-RegistryStringValue $stage $path "AutoRepeatRate" "31"
+    $path2 = "HKCU:\Control Panel\Keyboard"
+    Install-RegistryStringValue $stage $path2 "KeyboardSpeed" "31"
+    Install-RegistryStringValue $stage $path2 "KeyboardDelay" "1"
+}
 
 Install-RegistryStringValue $stage $path "AutoRepeatDelay" "1000"
-Install-RegistryStringValue $stage $path "AutoRepeatRate" "500"
 Install-RegistryStringValue $stage $path "DelayBeforeAcceptance" "1000"
 Install-RegistryStringValue $stage $path "Flags" "126"
 
