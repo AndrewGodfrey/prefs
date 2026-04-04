@@ -1,9 +1,25 @@
 param($installationTracker, [string[]] $Suppress = @())
 
-foreach ($packageId in @("pwsh", "wget", "df", "ditto", "sysinternals", "claude", "python", "nuget", "powertoys")) {
+foreach ($packageId in @("pwsh", "wget", "df", "ditto", "sysinternals", "claude", "gh", "python", "nuget", "powertoys", "marktext")) {
     if ("pkg/$packageId" -notin $Suppress) {
         Install-PratPackage $installationTracker $packageId
     }
+}
+
+
+if ("pkg/marktext" -notin $Suppress) {
+    $stage = $installationTracker.StartStage('marktext-settings')
+    Install-InteractiveAlias $stage 'mt' "$home\AppData\Local\Programs\MarkText\MarkText.exe"
+    $prefsFile = "$env:APPDATA/marktext/preferences.json"
+    if (Test-Path $prefsFile) {
+        $prefs = Get-Content $prefsFile -Raw | ConvertFrom-Json -Depth 20
+        if ($prefs.editorLineWidth -ne '100%') {
+            $prefs.editorLineWidth = '100%'
+            $prefs | ConvertTo-Json -Depth 20 | Set-Content $prefsFile -Encoding utf8NoBOM
+            Write-Host "Set editorLineWidth to 100%"
+        }
+    }
+    $installationTracker.EndStage($stage)
 }
 
 if ("pkg/winmerge" -notin $Suppress) {
