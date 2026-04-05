@@ -179,7 +179,7 @@ Describe "Get-AppliedLayoutsFromEditorParams merge" {
         $entries[0]['applied-layout']['uuid'] | Should -Be '{LAYOUT_A}'
     }
 
-    It "preserves existing entry for a 3rd monitor beyond the layout count" {
+    It "preserves existing entry for a leftmost monitor skipped by the layout count (e.g. laptop screen)" {
         $editorParams = @{
             monitors = @(
                 @{ 'monitor' = 'LEFT';  'monitor-instance-id' = 'inst-1'; 'monitor-serial-number' = 'S1'
@@ -191,20 +191,20 @@ Describe "Get-AppliedLayoutsFromEditorParams merge" {
             )
         }
         $existingEntries = @(
-            @{ device = @{ 'monitor' = 'RIGHT'; 'monitor-instance' = 'inst-3' }
+            @{ device = @{ 'monitor' = 'LEFT'; 'monitor-instance' = 'inst-1' }
                'applied-layout' = @{ uuid = '{EXISTING_LAYOUT}'; type = 'priority-grid' } }
         )
 
         $result = Get-AppliedLayoutsFromEditorParams $editorParams $layouts $existingEntries
         $entries = $result['applied-layouts']
 
-        # 2 from layouts + 1 preserved for 3rd monitor
+        # 2 from layouts (MID, RIGHT) + 1 preserved for LEFT (skipped)
         $entries.Count | Should -Be 3
-        $entries[0].device['monitor'] | Should -Be 'LEFT'
+        $entries[0].device['monitor'] | Should -Be 'MID'
         $entries[0]['applied-layout']['uuid'] | Should -Be '{LAYOUT_A}'
-        $entries[1].device['monitor'] | Should -Be 'MID'
+        $entries[1].device['monitor'] | Should -Be 'RIGHT'
         $entries[1]['applied-layout']['uuid'] | Should -Be '{LAYOUT_B}'
-        $entries[2].device['monitor'] | Should -Be 'RIGHT'
+        $entries[2].device['monitor'] | Should -Be 'LEFT'
         $entries[2]['applied-layout']['uuid'] | Should -Be '{EXISTING_LAYOUT}'
     }
 
