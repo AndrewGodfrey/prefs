@@ -145,5 +145,18 @@ no `todouble()` needed, and no magic constants to get wrong.
 see key columns first while still discovering what other columns exist.
 
 For **queries whose results will be consumed by an MCP tool or API** (where all columns are
-returned as data), use `project` with an explicit column list instead. Otherwise, tide tables can produce multi-MB
+returned as data), use `project` with an explicit column list instead. Otherwise, wide tables can produce multi-MB
 responses that overwhelm context.
+
+
+## `between` range variables
+
+`datetime(x) .. datetime(y)` is a range literal — it cannot be assigned to a `let` variable.
+Use two separate variables:
+
+```kusto
+let timeStart = datetime(2026-03-27);
+let timeEnd = datetime(2026-03-31);
+// ...
+| where PreciseTimeStamp between(timeStart .. timeEnd)
+```
