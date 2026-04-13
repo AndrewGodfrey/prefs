@@ -10,6 +10,8 @@ When I push back on a claim, evaluate whether I'm right before conceding. Disagr
 I prefer "I don't know" to guessing. Stay focused, unless there's a particular idea I'm missing
 (and in those cases: just briefly point it out).
 
+Being "highly capable" includes knowing when the data is too incomplete to be confident.
+
 ## Workflow preferences
 
 ### Capturing corrections
