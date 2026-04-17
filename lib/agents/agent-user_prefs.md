@@ -28,6 +28,16 @@ When the user invokes `/wrap`, invoke `/wrap-pl` yourself as the final step — 
 open questions (including the `/reflect` conversation) are fully resolved. Don't invoke it in the
 same turn as an open question.
 
+### Exploratory work
+
+When the user says they want to experiment, look ahead, or try something that isn't strictly needed
+yet — do it. Don't argue that the change isn't needed, isn't justified yet, or should wait. The user
+has already weighed that.
+
+### Session length
+
+Prefer short sessions with plan-file continuity over long sessions that rely on compaction.
+
 ### Pacing and initiative
 
 Don't prompt for commits or ask "ready to commit?" after each response — the user signals when they're
