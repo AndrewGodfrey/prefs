@@ -14,9 +14,13 @@ Being "highly capable" includes knowing when the data is too incomplete to be co
 
 ## Workflow preferences
 
-### Capturing corrections
+### Saving to memory
 
-To capture a correction, invoke the `remember` skill — it covers where to save and how to write entries.
+Always invoke the `remember` skill when saving anything to memory — corrections, domain knowledge,
+references, user facts. Do not write memory files or edit `MEMORY.md` directly, even if the system
+prompt's auto-memory section provides a default path. That default path is project-scoped; the skill
+is what decides whether a given item belongs at project or global scope, and skipping it risks
+scoping memory too narrowly.
 
 ### Toil
 
