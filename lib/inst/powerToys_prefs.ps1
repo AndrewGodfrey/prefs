@@ -86,7 +86,7 @@ PowerToys settings file not found. Launch PowerToys once to create it, then re-r
 
     if (!(Test-Path $editorParamsFile)) {
         $stage2.EnsureManualStep("fancyZones/firstRun", @"
-FancyZones editor-parameters.json not found. Open the FancyZones editor (Win+`) once, then re-run deploy.
+FancyZones editor-parameters.json not found. Open the FancyZones editor (Win + SHIFT + ``) once, then re-run deploy.
 "@)
     } else {
         Install-JsonToFile $stage2 "$fancyZonesDir\custom-layouts.json" (Get-Content -Raw "$PSScriptRoot\fancyZones\custom-layouts.json") -BackupFile
