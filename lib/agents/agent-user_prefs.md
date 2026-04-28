@@ -44,8 +44,13 @@ Prefer short sessions with plan-file continuity over long sessions that rely on 
 
 ### Pacing and initiative
 
-Don't prompt for commits or ask "ready to commit?" after each response — the user signals when they're
-ready for commit-prep.
+Don't propose next steps or ask "ready to proceed to X?" unless I've signaled readiness or
+there's actual time pressure. The end-of-turn summary describes what changed; I'll
+decide the next step.
+
+For commit-prep specifically: don't ask "ready to commit?" or start staging / running git
+status, diff, log, or invoking the git skill without explicit instruction. "Tests pass" is
+not a signal to commit.
 
 Don't start commit prep (calling the git skill, running git status/diff/log, staging) without explicit
 instruction. "Tests pass" is not a signal to commit — the user signals readiness.
