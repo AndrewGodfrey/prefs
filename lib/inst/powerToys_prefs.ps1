@@ -53,9 +53,10 @@ function Get-AppliedLayoutsFromEditorParams([hashtable] $editorParams, [hashtabl
     # Preserve existing entries for monitors that didn't get a fresh assignment:
     # - monitors in editor-parameters beyond the layout count (e.g. 3rd monitor with only 2 layouts)
     # - monitors from other locations not in editor-parameters at all
+    # Entries with no monitor-instance are corrupt/legacy and are dropped.
     foreach ($existing in $existingEntries) {
         $instanceId = $existing.device['monitor-instance']
-        if (-not $assignedInstanceIds.ContainsKey($instanceId)) {
+        if ($instanceId -and -not $assignedInstanceIds.ContainsKey($instanceId)) {
             $entries += $existing
         }
     }

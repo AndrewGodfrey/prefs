@@ -239,4 +239,23 @@ Describe "Get-AppliedLayoutsFromEditorParams merge" {
         $entries[2].device['monitor'] | Should -Be 'LOC_A_LEFT'
         $entries[3].device['monitor'] | Should -Be 'LOC_A_RIGHT'
     }
+
+    It "drops existing entries with missing monitor-instance" {
+        $editorParams = @{
+            monitors = @(
+                @{ 'monitor' = 'MON_A'; 'monitor-instance-id' = 'inst-A'; 'monitor-serial-number' = 'SER_A'
+                   'monitor-number' = 1; 'virtual-desktop' = '{VD}'; 'left-coordinate' = 0 }
+            )
+        }
+        $existingEntries = @(
+            @{ device = @{ 'monitor' = 'CORRUPT' }
+               'applied-layout' = @{ uuid = '{CORRUPT_LAYOUT}' } }
+        )
+
+        $result = Get-AppliedLayoutsFromEditorParams $editorParams $script:layouts $existingEntries
+        $entries = $result['applied-layouts']
+
+        $entries.Count | Should -Be 1
+        $entries[0].device['monitor'] | Should -Be 'MON_A'
+    }
 }
