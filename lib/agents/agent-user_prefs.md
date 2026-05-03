@@ -59,3 +59,6 @@ instruction. "Tests pass" is not a signal to commit — the user signals readine
 
 - Markdown files: wrap lines at 120 characters max. Break at natural phrase boundaries
   for readability (like this).
+- All other text files (code, configs, prose): default ceiling of 240 characters per line.
+  Defer to a lower limit if the repo or filetype has one. **Apply only to lines you're
+  changing** — don't reformat untouched lines just because they exceed the limit.
