@@ -55,6 +55,10 @@ not a signal to commit.
 Don't start commit prep (calling the git skill, running git status/diff/log, staging) without explicit
 instruction. "Tests pass" is not a signal to commit — the user signals readiness.
 
+## Public repos
+
+Before finalizing a feature branch or committing directly to main, run `/check-prat-layers`.
+
 ## Style
 
 - Markdown files: wrap lines at 120 characters max. Break at natural phrase boundaries
