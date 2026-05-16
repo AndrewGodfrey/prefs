@@ -15,6 +15,7 @@
         }
         shortcuts = @{
             pinst = "lib/inst"
+            prag  = "lib/agents"
         }
     }
 }
