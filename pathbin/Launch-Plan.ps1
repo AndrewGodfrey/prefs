@@ -21,7 +21,7 @@ function main {
     $notices = [System.Collections.Generic.List[string]]::new()
     foreach ($n in $resolved.notices) { $notices.Add($n) }
 
-    if (-not (getPlansDir)) { $notices.Add('No plans directory configured — O and R unavailable. Provide lib/claude/Get-PlansDir.ps1 in your de repo.') }
+    if (-not (getPlansDir)) { $notices.Add('No plans directory configured — O and R unavailable. Provide lib/agents/Get-PlansDir.ps1 in your de repo.') }
 
     $syncResult = getSyncPath
     $syncPath   = $syncResult.path
@@ -592,14 +592,14 @@ function getCrossMachineFlags([string] $syncPath) {
 
 function getPlansDir {
     Import-Module "$home/prat/lib/PratBase/PratBase.psd1" -ErrorAction SilentlyContinue
-    $configScript = Resolve-PratLibFile 'lib/claude/Get-PlansDir.ps1' -ErrorAction SilentlyContinue
+    $configScript = Resolve-PratLibFile 'lib/agents/Get-PlansDir.ps1' -ErrorAction SilentlyContinue
     if ($configScript) { return & $configScript }
     return $null
 }
 
 function getSyncPath {
     Import-Module "$home/prat/lib/PratBase/PratBase.psd1" -ErrorAction SilentlyContinue
-    $configScript = Resolve-PratLibFile 'lib/claude/Get-PlanTrackingConfig.ps1' -ErrorAction SilentlyContinue
+    $configScript = Resolve-PratLibFile 'lib/agents/Get-PlanTrackingConfig.ps1' -ErrorAction SilentlyContinue
     if (-not $configScript) {
         return @{ path = $null; notice = 'No sync-backed path configured — cross-machine visibility unavailable. (Suppress with -NoSyncBackedWarning)' }
     }
