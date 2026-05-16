@@ -1,4 +1,5 @@
 ---
+name: wrap-pl
 description: After /wrap, mark the active plan as ready in db.json so Launch-Plan (pl) offers a
   fresh session next time. Run after /wrap completes, then /exit.
 ---
