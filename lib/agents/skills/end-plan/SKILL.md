@@ -1,5 +1,5 @@
 ---
-name: endPlan
+name: end-plan
 description: Finalize and close a completed plan. Runs the final wrap, unregisters from
   Launch-Plan, and deletes the plan file. User-invocable only — do not trigger autonomously.
 ---

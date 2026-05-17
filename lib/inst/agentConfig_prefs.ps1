@@ -21,7 +21,7 @@ if ('installHomeClaudeMd' -notin $Suppress) {
 $skillSources = @(
     @{ set = @("testing", "working-with-git", "remember", "plan-format", "prat-run-tests", "run-tests", "check-prat-layers",
                "land-step", "reflect", "review-changes", "wrap", "reviewer", "simplify"); srcDir = "$home\prat\lib\agents\skills" }
-    @{ set = @("kql-techniques", "wrap-pl", "endPlan"); srcDir = "$home\prefs\lib\agents\skills" }
+    @{ set = @("kql-techniques", "wrap-pl", "end-plan"); srcDir = "$home\prefs\lib\agents\skills" }
 )
 if ($Config.deSkillSources) {
     $skillSources += $Config.deSkillSources
