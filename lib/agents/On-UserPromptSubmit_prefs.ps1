@@ -1,20 +1,20 @@
 # On-UserPromptSubmit.ps1
-# UserPromptSubmit hook: records (claude PID → session_id, cwd) for Launch-Plan.ps1.
+# UserPromptSubmit hook: records (harness process PID → session_id, cwd) for Launch-Plan.ps1.
 #
 # Output: nothing (no additionalContext emitted).
 
-function main($hookData) {
+function main($hookData, [string] $harnessName) {
     define_Proc
-    Save-PidSessionRecord $hookData
+    Save-PidSessionRecord $hookData $harnessName
 }
 
-function Save-PidSessionRecord($hookData) {
+function Save-PidSessionRecord($hookData, [string] $harnessName) {
     $sessionId = $hookData.session_id
     $cwd       = $hookData.cwd
     if (-not $sessionId -or -not $cwd) { return }
 
-    $claudePid = Get-ClaudePid
-    if (-not $claudePid) { return }
+    $harnessPid = Get-HarnessPid $harnessName
+    if (-not $harnessPid) { return }
 
     $runningDir = "$home/prat/auto/context/running"
     $intentPath = "$runningDir/launch_intent.json"
@@ -23,7 +23,7 @@ function Save-PidSessionRecord($hookData) {
     $null = New-Item -ItemType Directory -Path $runningDir -Force
     $data = [pscustomobject]@{session_id = $sessionId; cwd = $cwd}
     if ($planFile) { $data | Add-Member -NotePropertyName 'planFile' -NotePropertyValue $planFile }
-    ConvertTo-Json -InputObject $data -Compress | Set-Content "$runningDir/pid_$claudePid.txt" -Encoding UTF8
+    ConvertTo-Json -InputObject $data -Compress | Set-Content "$runningDir/pid_$harnessPid.txt" -Encoding UTF8
 }
 
 function normalizePath([string] $p) { $p -replace '\\', '/' }
@@ -38,16 +38,19 @@ function getIntentPlanFile([string] $cwd, [string] $intentPath) {
     return $intent.planFile
 }
 
-function Get-ClaudePid {
+function Get-HarnessPid([string] $harnessName) {
+     $harness = Get-Process -Name $harnessName -ErrorAction SilentlyContinue
+     if ($null -eq $harness) { return $null }
+     return $harness.Id
     $id = $PID
-    # Find the parent 'claude' process (the hook runs in a child or descendant process)
+    # Find the parent harness process (the hook runs in a child or descendant process)
     for ($i = 0; $i -lt 6; $i++) {
         $parentPid = getParentProcess $id
         if ($parentPid -eq 0) { return $null }
         $parent = Get-Process -Id $parentPid -ErrorAction SilentlyContinue
 
         if ($null -eq $parent) { return $null }
-        if ($parent.Name -eq 'claude') { return $parent.Id }
+        if ($parent.Name -eq $harnessName) { return $parent.Id }
         $id = $parent.Id
     }
     return $null
@@ -97,5 +100,5 @@ function getParentProcess($childPid) {
 
 if ($MyInvocation.InvocationName -ne '.') {
     $hookData = ([Console]::In.ReadToEnd()) | ConvertFrom-Json
-    main $hookData | Out-Null
+    main $hookData 'claude' | Out-Null
 }
