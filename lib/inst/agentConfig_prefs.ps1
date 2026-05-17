@@ -19,7 +19,7 @@ if ('installHomeClaudeMd' -notin $Suppress) {
 
 # Global skills from prat, prefs, and (when present) de.
 $skillSources = @(
-    @{ set = @("testing", "working-with-git", "remember", "plan-format", "prat-run-tests", "run-tests", "check-prat-layers",
+    @{ set = @("testing", "working-with-git", "remember", "plan-format", "pratified-dev-loop", "run-tests", "check-prat-layers",
                "land-step", "reflect", "review-changes", "wrap", "reviewer", "simplify"); srcDir = "$home\prat\lib\agents\skills" }
     @{ set = @("kql-techniques", "wrap-pl", "end-plan"); srcDir = "$home\prefs\lib\agents\skills" }
 )
