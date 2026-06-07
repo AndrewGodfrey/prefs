@@ -27,9 +27,6 @@ if ($Config.deSkillSources) {
     $skillSources += $Config.deSkillSources
 }
 Install-ClaudeSkillSet $stage $skillSources "$home/.claude/skills"
-Install-ClaudeMarkdownFiles $stage "$home\prat\lib\agents\subagents" "$home/.claude/agents" -Cleanup
-Install-ClaudeMarkdownFiles $stage "$home\prat\lib\agents\commands" "$home/.claude/commands" -Cleanup
-Install-ClaudeMarkdownFiles $stage "$home\prefs\lib\agents\commands" "$home/.claude/commands" -Cleanup
 
 Install-ClaudeUserSettings $stage
 
