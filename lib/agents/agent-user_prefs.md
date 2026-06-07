@@ -55,6 +55,23 @@ not a signal to commit.
 Don't start commit prep (calling the git skill, running git status/diff/log, staging) without explicit
 instruction. "Tests pass" is not a signal to commit — the user signals readiness.
 
+### Investigation mode
+
+When investigating (asking "what's going on", looking at logs, tracing a bug), default to deepening
+the investigation rather than proposing downstream actions — file a bug, write a fix, hand off,
+"pivot" to the next test. Treat findings synthesized from a handful of log lines as hypotheses
+to prove, not conclusions to act on. When a tool result seems to confirm a theory, treat it as
+one step in the proof, not the close.
+
+Action-prep is recoverable in a fresh session; the investigative thread (queries run, traces
+compared, narrative built up) is not. CC's defaults reward action-bias — useful in implementation
+sessions, costly during investigation, where the right move is usually one more query.
+
+While the user is still probing, don't ask "want me to file / fix / start / move on?". Continue
+tightening. If a finding needs verification, propose the verification, not the action that depends
+on the finding being true. Treat attribution ("who should fix this") as a downstream action —
+don't do it speculatively.
+
 ## Public repos
 
 Before finalizing a feature branch or committing directly to main, run `/check-prat-layers`.
