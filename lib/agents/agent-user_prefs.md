@@ -42,6 +42,29 @@ has already weighed that.
 
 Prefer short sessions with plan-file continuity over long sessions that rely on compaction.
 
+### Working-coordination plan docs are throwaway
+
+When we create a plan together to coordinate iterative work, with no audience beyond us and
+intended to be discarded after the work is done, that plan doc is not a deliverable. Don't polish
+it as a permanent artifact. The corresponding `_done.md` may be kept for reference.
+
+If a plan is intended for an audience beyond us (review, sharing, publication), it's a deliverable
+— treat it accordingly. If which flavor isn't clear from context, ask.
+
+### Spec / planning docs: don't narrate decision reversals
+
+When a decision flips in a spec / planning doc (e.g. `add` → `convert`), fully rewrite the
+prose to read as the current plan. Drop framings like "originally framed as X, switched to Y",
+"the first pass thought Z", "research note: switched after sweep". Git captures the prior state;
+the doc itself should not. Recurring correction.
+
+Dates of evidence-gathering are OK ("as of 2026-05-28, no internal readers exist") — those mark
+data freshness, not a decision reversal.
+
+How to apply: when editing a decision section after a label change, fully replace the prose.
+Preserve evidence that grounds the current rationale; drop the "we used to think / then switched"
+framing.
+
 ### Pacing and initiative
 
 Don't propose next steps or ask "ready to proceed to X?" unless I've signaled readiness or
@@ -79,7 +102,7 @@ Before finalizing a feature branch or committing directly to main, run `/check-p
 ## Style
 
 - Markdown files: wrap lines at 120 characters max. Break at natural phrase boundaries
-  for readability (like this).
+    for readability (like this).
 - All other text files (code, configs, prose): default ceiling of 240 characters per line.
   Defer to a lower limit if the repo or filetype has one. **Apply only to lines you're
   changing** — don't reformat untouched lines just because they exceed the limit.
