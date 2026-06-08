@@ -101,8 +101,11 @@ Before finalizing a feature branch or committing directly to main, run `/check-p
 
 ## Style
 
-- Markdown files: wrap lines at 120 characters max. Break at natural phrase boundaries
+- Markdown files: 
+  - wrap lines at 120 characters max. Break at natural phrase boundaries
     for readability (like this).
+  - On wide tables, prepend them with `<!-- prettier-ignore -->`. Stops prettier from reflowing
+    them into less-readable shapes.
 - All other text files (code, configs, prose): default ceiling of 240 characters per line.
   Defer to a lower limit if the repo or filetype has one. **Apply only to lines you're
   changing** — don't reformat untouched lines just because they exceed the limit.
