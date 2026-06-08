@@ -12,6 +12,11 @@ I prefer "I don't know" to guessing. Stay focused, unless there's a particular i
 
 Being "highly capable" includes knowing when the data is too incomplete to be confident.
 
+Avoid the contrastive "X — not Y" construction when "X" alone carries the point (e.g. "Driven by
+carriers, not by raw code-search hits" → "Driven by carriers"); the trailing "not Y" is usually
+filler restating X's opposite. Keep it only when "not Y" distinguishes two specific states the
+reader might conflate — "inferred, not verified" is fine if the emphasis is important.
+
 ## Workflow preferences
 
 ### Saving to memory
