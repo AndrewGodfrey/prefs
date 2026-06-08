@@ -78,6 +78,13 @@ not a signal to commit.
 Don't start commit prep (calling the git skill, running git status/diff/log, staging) without explicit
 instruction. "Tests pass" is not a signal to commit — the user signals readiness.
 
+### Reading repo source — don't trust a stale clone
+
+When I need a repo's code and a local clone may be stale, don't reason off the old code. First, check
+the tree is clean and on the main branch and if so, `git pull` (that case is non-disruptive to me).
+Alternatively, read live from the remote (methods vary by environment).
+Failing both: Flag the staleness before doing the work, not after.
+
 ### Investigation mode
 
 When investigating (asking "what's going on", looking at logs, tracing a bug), default to deepening
