@@ -61,6 +61,10 @@ Here's a best-effort list of extensions and settings I set up ... which are now 
   - ms-vscode.hexeditor
   - ivoh.openfileatcursor
     - trying default bindings - Alt-D and Ctrl-Shift-Alt-D
+    - set "openfileatcursor.filenameRegEx" to "[\\w.\\-]+(?::\\d+){0,2}" so the word at the cursor includes a
+      trailing :line[:col]. The extension forwards the token to Quick Open (Ctrl-P), which natively parses
+      ":line", giving both the disambiguation picker and the line jump. (Default regex stops at the colon,
+      dropping the line.)
   - Pester Tests (Pester)
   - PowerShell (Microsoft)
   - R.paste-markdown
