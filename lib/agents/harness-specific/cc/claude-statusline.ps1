@@ -1,3 +1,4 @@
+param([switch] $NoCwd)
 Import-Module "$home\prat\lib\PratBase\PratBase.psd1" -ErrorAction SilentlyContinue
 
 # Returns a formatted rate-limit display string, or nothing if the window is too new or too close to reset.
@@ -62,17 +63,20 @@ if ($MyInvocation.InvocationName -ne '.') {
     $rlStr = if ($rlParts) { " $($rlParts -join ' ')" } else { '' }
 
     # CWD in prompt format (mirrors On-PromptLocationChanged.ps1)
-    $cwd = $j.cwd
-    $project = Get-PratProject $cwd -ErrorAction SilentlyContinue
-    if ($project) {
-        $subdir  = if ($project.subdir) { " $($project.subdir)/" -replace '\\', '/' } else { '' }
-        $bk      = if ($project.buildKind) { "($($project.buildKind))" } else { '' }
-        $loc     = "[$($project.id.ToLower())]$bk$subdir"
-    } else {
-        $loc = $cwd
+    $loc = ''
+    if (-not $NoCwd) {
+        $cwd = $j.cwd
+        $project = Get-PratProject $cwd -ErrorAction SilentlyContinue
+        if ($project) {
+            $subdir  = if ($project.subdir) { " $($project.subdir)/" -replace '\\', '/' } else { '' }
+            $bk      = if ($project.buildKind) { "($($project.buildKind))" } else { '' }
+            $loc     = " [$($project.id.ToLower())]$bk$subdir"
+        } else {
+            $loc = " $cwd"
+        }
     }
 
     $shouldWarn = & (Resolve-PratLibFile "lib/agents/Get-ShouldWarnOutsideSandbox.ps1")
     $sandbox = if ($shouldWarn) { '⚠️ ' } else { '' }
-    Write-Host "$sandbox$bar $loc$rlStr"
+    Write-Host "$sandbox$bar$loc$rlStr"
 }
