@@ -41,12 +41,16 @@ if ($MyInvocation.InvocationName -ne '.') {
     $j = [Console]::In.ReadToEnd() | ConvertFrom-Json
 
     # 5-bar context indicator
+    # Claude Code sends context_window.used_percentage; Copilot CLI sends current_context_used_percentage (top-level).
     # $fixedPct: system prompt + tools + mandatory memory files — not in user's control (~8%). Recheck periodically.
     # $bufferPct: autocompact buffer (~16.5%). Recheck periodically.
     $fixedPct  = 8.0
     $bufferPct = 16.5
     $usablePct = 100 - $fixedPct - $bufferPct   # 75.5% — the range from session-start to autocompact
-    $consumed  = [math]::Max(0, $j.context_window.used_percentage - $fixedPct)
+    $rawPct    = if ($null -ne $j.context_window.used_percentage) { $j.context_window.used_percentage }
+                 elseif ($null -ne $j.current_context_used_percentage) { $j.current_context_used_percentage }
+                 else { 0 }
+    $consumed  = [math]::Max(0, $rawPct - $fixedPct)
     $bars      = if ($usablePct -gt 0) { [math]::Min(5, [math]::Round($consumed / $usablePct * 5)) } else { 5 }
     $bar       = ([string]'▰' * $bars) + ([string]'▱' * (5 - $bars))
 

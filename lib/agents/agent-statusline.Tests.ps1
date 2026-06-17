@@ -1,6 +1,6 @@
 BeforeAll {
     Import-Module "$home/prat/lib/PratBase/PratBase.psd1" -Force
-    . "$PSScriptRoot/claude-statusline.ps1"
+    . "$PSScriptRoot/agent-statusline.ps1"
 
     $script:now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 
@@ -83,7 +83,7 @@ Describe "claude-statusline" {
                 rate_limits    = @{ five_hour = @{ used_percentage = 50; resets_at = $now + 7200 } }
                 cwd            = $env:TEMP
             } | ConvertTo-Json -Depth 5
-            $out = ($json | pwsh -NoProfile -File "$PSScriptRoot/claude-statusline.ps1") -join ''
+            $out = ($json | pwsh -NoProfile -File "$PSScriptRoot/agent-statusline.ps1") -join ''
             $out | Should -Match '5h:'
         }
     }
@@ -91,7 +91,7 @@ Describe "claude-statusline" {
     Context "no rate limits" {
         It "no rl section when rate_limits absent" {
             $json = @{ context_window = @{ used_percentage = 10 }; cwd = $env:TEMP } | ConvertTo-Json
-            $out = ($json | pwsh -NoProfile -File "$PSScriptRoot/claude-statusline.ps1") -join ''
+            $out = ($json | pwsh -NoProfile -File "$PSScriptRoot/agent-statusline.ps1") -join ''
             $out | Should -Not -Match '5h:|7d:'
         }
     }

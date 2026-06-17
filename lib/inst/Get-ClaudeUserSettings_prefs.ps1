@@ -11,7 +11,7 @@ return @{
     additionalDirectories = @("$homeFwd/prat", "$homeFwd/prefs")
     statusLine         = @{
         type    = "command"
-        command = 'pwsh -c ''& "$home\prefs\lib\agents\harness-specific\cc\claude-statusline.ps1"'''
+        command = 'pwsh -c ''& "$home\prefs\lib\agents\agent-statusline.ps1"'''
     }
     permissions        = @{
         allow = @(
