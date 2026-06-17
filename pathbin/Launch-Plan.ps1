@@ -479,7 +479,9 @@ function saveDb($db, [string] $path) {
 # --- Process detection ---
 
 function getLiveClaudePids {
-    return @(Get-Process claude -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
+    $procs = Get-Process claude -ErrorAction SilentlyContinue
+    if (-not $procs) { return ,@() }
+    return ,@($procs | Select-Object -ExpandProperty Id | Where-Object { $_ -is [int] })
 }
 
 function resolveSessionIds($entries, [string] $rDir, $livePids) {

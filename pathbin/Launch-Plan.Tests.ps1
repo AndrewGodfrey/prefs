@@ -272,6 +272,27 @@ Describe "isLive" {
     }
 }
 
+Describe "getLiveClaudePids" {
+    It "returns an empty array when no claude process is found" {
+        Mock Get-Process { }
+
+        $result = getLiveClaudePids
+
+        $result -is [array] | Should -BeTrue
+        $result.Count       | Should -Be 0
+    }
+
+    It "returns the PID of each running claude process" {
+        Mock Get-Process { [pscustomobject]@{Id = 1234}; [pscustomobject]@{Id = 5678} }
+
+        $result = getLiveClaudePids
+
+        $result | Should -HaveCount 2
+        $result | Should -Contain 1234
+        $result | Should -Contain 5678
+    }
+}
+
 Describe "cleanStaleRunningFiles" {
     It "removes pid files whose pids are not live" {
         $rDir = "TestDrive:\clean-stale"
