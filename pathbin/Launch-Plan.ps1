@@ -1,6 +1,8 @@
 # Launch-Plan.ps1  (alias: pl)
 # Interactive launcher for plan-based Claude sessions.
 # Tracks open plans, detects live/dormant Claude processes, and launches or resumes sessions.
+#
+# Design: see docs/Launch-Plan.md
 
 param([switch] $NoSyncBackedWarning)
 

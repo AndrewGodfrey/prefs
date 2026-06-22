@@ -30,8 +30,8 @@ session_ids for one project). V1 just displays them all and lets the user pick. 
 
 ### Main view
 
-Lists open projects with: plan file, state, session_id(s), and a live/dormant flag (live = a
-Claude process is currently running with that session_id).
+Lists open projects with: plan file, state, and a live/dormant flag (live = a Claude process
+is currently running with that session_id).
 
 Plans flagged as open on another machine (from sync-backed presence files) are highlighted — this
 is the main guard against accidentally forking a workitem across machines.
@@ -40,8 +40,14 @@ is the main guard against accidentally forking a workitem across machines.
 ### Interactions
 
 **Enter on an existing project:**
-- If `ready` → launch fresh `cl` with "please do the next step in plans/foo.md"
-- If `discussing` or `in-progress` → resume: `cl --resume <session_id>` (user picks if multiple)
+- If `ready` → launch fresh `cl` with "please do the next step in plans/foo.md"; state transitions
+  to `in-progress`
+- If `discussing` or `in-progress` with a session_id → resume: `cl --resume <session_id>` (user picks
+  if multiple). Before resuming, the session file is located by GUID across all CC project directories
+  and moved into place if needed (handles CWD drift from role changes, repo moves, etc.). If the GUID
+  isn't found anywhere, falls through to fresh launch and clears the stale ID.
+- If `discussing` or `in-progress` with no session_id → launch fresh `cl` with "Let's continue work
+  on…"; `discussing` transitions to `in-progress`
 - If Claude is already live for this project → do nothing (can't switch focus programmatically)
 
 **O → open untracked plan:**
@@ -56,11 +62,19 @@ is the main guard against accidentally forking a workitem across machines.
 - User picks session, then picks plan (tracked entries + untracked from plans dir)
 - Links session to plan; creates db entry if plan wasn't already tracked
 
+**S → change state:**
+- Cycles the selected entry through `discussing` / `in-progress` / `ready`
+- Blocked if the session is currently live
+
+**U → unregister:**
+- Removes the selected entry from db
+- Blocked if the session is currently live
+
 
 ### Process detection (live vs. dormant)
 
 A Claude hook (likely `UserPromptSubmit`, fires on every prompt) writes
-`~/prat/auto/context/running/pid_<pid>.txt` containing the session_id. Written idempotently
+`~/prat/auto/context/running/pid_<pid>.txt` containing `{session_id, cwd}`. Written idempotently
 — content doesn't change within a session.
 
 On tool startup: get all live `claude.exe` pids (`(Get-Process claude).Id`), then iterate
@@ -71,10 +85,14 @@ at startup.
 
 ### Write paths
 
-Three separate writers, each owning distinct data:
+Four separate writers, each owning distinct data:
 
-- **Tool**: creates db entry at launch — plan file, cwd, state. Session_id is unknown at this
-  point (CC assigns it after startup); entry is left pending.
+- **Tool**: before launching `cl`, writes `running/launch_intent.json` containing `{planFile, cwd}`;
+  clears it after `cl` exits. Also creates/updates the db entry (plan file, cwd, state). Session_id
+  is unknown at launch time; entry is left pending.
+- **Tool (pre-write)**: for resume launches where the session_id is already known, pre-writes
+  `running/pid_<pid>.txt` with `{session_id, cwd}` immediately after `Start-Process` returns the pid
+  — before the first hook fires — so the session shows as live on the next render.
 - **Hook** (`UserPromptSubmit`): writes `running/pid_<pid>.txt` containing `{session_id, cwd}`.
   On next tool startup, pending entries are matched by cwd to fill in session_id.
 - **Claude** (via skills such as `/wrap`, or on a manual focus switch): reads and updates
@@ -87,9 +105,10 @@ Three separate writers, each owning distinct data:
 Each machine writes `<syncBackedPath>/.plan-tracking/<machineName>.json` on tool startup,
 containing its current open projects + a `lastSeen` timestamp per entry.
 
-The tool reads all machine files and flags any plan that appears in another machine's file.
-Entries are kept indefinitely — stale ones (retired machines, abandoned sessions) can be
-cleaned up manually.
+The tool reads all machine files and flags any plan that appears in another machine's file whose
+`lastSeen` is within the last 7 days (entries older than that are skipped as stale). Entries are
+kept indefinitely in the file — stale ones (retired machines, abandoned sessions) can be cleaned
+up manually.
 
 **Configuration:** The sync-backed path is a config value defined in each `de` instance (home and
 work use different paths). The tool reads it from a `de`-supplied config; if not set, it warns
@@ -100,4 +119,5 @@ param (for single-machine users/envs when this eventually moves to `prat`).
 ### Db format
 
 JSON file at `~/prat/auto/context/db.json`. Simple array of project objects — easy to inspect
-and hand-edit for weird cases (retired machines, abandoned sessions, etc.).
+and hand-edit for weird cases (retired machines, abandoned sessions, etc.). Each entry has:
+`planFile`, `state`, `cwd`, `sessionIds`.
