@@ -13,5 +13,7 @@ plan), list the candidates and ask the user to confirm before proceeding.
    - If no matching entry is found, say so — do not create one.
    - If the entry's state is already `"ready"`, say so and stop (no change needed).
    - If the entry's state is `"plan-complete"`, warn before overwriting — confirm with the user.
-3. Set `state` to `"ready"` and `sessionIds` to `[]`. Write back the full array as valid JSON.
-4. Confirm what was updated, then tell the user to run `/exit`.
+3. **If the plan file no longer exists** (plan is complete and was deleted by `/wrap`): remove the
+   entry from the array entirely. Write back the remaining entries as valid JSON.
+4. Otherwise: set `state` to `"ready"` and `sessionIds` to `[]`. Write back the full array as valid JSON.
+5. Confirm what was updated, then tell the user to run `/exit`.
