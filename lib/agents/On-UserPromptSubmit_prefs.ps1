@@ -39,9 +39,7 @@ function getIntentPlanFile([string] $cwd, [string] $intentPath) {
 }
 
 function Get-HarnessPid([string] $harnessName) {
-     $harness = Get-Process -Name $harnessName -ErrorAction SilentlyContinue
-     if ($null -eq $harness) { return $null }
-     return $harness.Id
+    if (-not (Get-Process -Name $harnessName -ErrorAction SilentlyContinue)) { return $null }
     $id = $PID
     # Find the parent harness process (the hook runs in a child or descendant process)
     for ($i = 0; $i -lt 6; $i++) {

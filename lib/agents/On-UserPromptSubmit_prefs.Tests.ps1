@@ -60,3 +60,74 @@ Describe "getIntentPlanFile" {
         $result | Should -BeNull
     }
 }
+
+Describe "Get-HarnessPid" {
+    Context "harness process not running" {
+        BeforeAll {
+            function Get-Process { param($Name, $Id, $ErrorAction) $null }
+        }
+
+        It "returns null" {
+            Get-HarnessPid 'claude' | Should -BeNull
+        }
+    }
+
+    Context "parent process is the harness" {
+        BeforeAll {
+            $parentPid = 1234
+            function Get-Process {
+                param($Name, $Id, [string] $ErrorAction)
+                if ($Name -eq 'claude') { return [pscustomobject]@{ Name = 'claude'; Id = 99 } }
+                if ($Id -eq $parentPid)  { return [pscustomobject]@{ Name = 'claude'; Id = $parentPid } }
+                return [pscustomobject]@{ Name = 'pwsh'; Id = $Id }
+            }
+            function getParentProcess { param($childPid) $parentPid }
+        }
+
+        It "returns the parent PID" {
+            Get-HarnessPid 'claude' | Should -Be $parentPid
+        }
+
+        It "returns a single integer, not an array" {
+            $result = Get-HarnessPid 'claude'
+            @($result).Count | Should -Be 1
+        }
+    }
+
+    Context "harness is two levels up" {
+        BeforeAll {
+            $grandparentPid = 5678
+            $parentPid      = 9999
+            function Get-Process {
+                param($Name, $Id, [string] $ErrorAction)
+                if ($Name -eq 'claude') { return [pscustomobject]@{ Name = 'claude'; Id = 99 } }
+                if ($Id -eq $grandparentPid) { return [pscustomobject]@{ Name = 'claude'; Id = $grandparentPid } }
+                return [pscustomobject]@{ Name = 'pwsh'; Id = $Id }
+            }
+            function getParentProcess {
+                param($childPid)
+                if ($childPid -eq $parentPid) { return $grandparentPid }
+                return $parentPid
+            }
+        }
+
+        It "returns the grandparent PID" {
+            Get-HarnessPid 'claude' | Should -Be $grandparentPid
+        }
+    }
+
+    Context "no harness ancestor within 6 levels" {
+        BeforeAll {
+            function Get-Process {
+                param($Name, $Id, [string] $ErrorAction)
+                if ($Name -eq 'claude') { return [pscustomobject]@{ Name = 'claude'; Id = 99 } }
+                return [pscustomobject]@{ Name = 'pwsh'; Id = $Id }
+            }
+            function getParentProcess { param($childPid) $childPid + 1 }
+        }
+
+        It "returns null" {
+            Get-HarnessPid 'claude' | Should -BeNull
+        }
+    }
+}
