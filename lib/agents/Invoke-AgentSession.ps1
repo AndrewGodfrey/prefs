@@ -1,10 +1,8 @@
 param(
     [string]      $Harness,
     [scriptblock] $LaunchHook,
-    [string]      $GetAgentRoleContextScript = "$PSScriptRoot/Get-AgentRoleContext.ps1"
+    [hashtable]   $Context
 )
-
-$ctx = & $GetAgentRoleContextScript -cwd $PWD
 
 $resumeSid = $null
 for ($i = 0; $i -lt $ARGS.Count - 1; $i++) {
@@ -12,17 +10,17 @@ for ($i = 0; $i -lt $ARGS.Count - 1; $i++) {
 }
 
 $ctxArgs = @()
-if ($ctx.targetRepo) {
-    $ctxArgs = @('--add-dir', $ctx.targetRepo)
+if ($Context.targetRepo) {
+    $ctxArgs = @('--add-dir', $Context.targetRepo)
 }
 
-Push-Location $ctx.roleDir
+Push-Location $Context.roleDir
 try {
     switch ($Harness) {
         'claude' {
             $claudeArgs = $ctxArgs
-            if ($ctx.contextMessage) {
-                $claudeArgs = $claudeArgs + @('--append-system-prompt', $ctx.contextMessage)
+            if ($Context.contextMessage) {
+                $claudeArgs = $claudeArgs + @('--append-system-prompt', $Context.contextMessage)
             }
             & $LaunchHook $resumeSid ($claudeArgs + $ARGS)
         }

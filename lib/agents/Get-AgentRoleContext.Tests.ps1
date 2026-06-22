@@ -14,6 +14,11 @@ Describe "Get-AgentRoleContext" {
             $result.roleDir | Should -Be "$home/agentRoles/default"
         }
 
+        It "returns roleName 'default'" {
+            $result = & $script -cwd "C:/some/project"
+            $result.roleName | Should -Be 'default'
+        }
+
         It "returns null targetRepo and contextMessage" {
             $result = & $script -cwd "C:/some/project"
             $result.targetRepo     | Should -BeNull
@@ -30,6 +35,11 @@ Describe "Get-AgentRoleContext" {
         It "returns role-specific roleDir" {
             $result = & $script -cwd "C:/repos/myrepo"
             $result.roleDir | Should -Be "$home/agentRoles/myrole"
+        }
+
+        It "returns roleName from agentRole" {
+            $result = & $script -cwd "C:/repos/myrepo"
+            $result.roleName | Should -Be 'myrole'
         }
 
         It "returns targetRepo from project root" {
@@ -49,8 +59,9 @@ Describe "Get-AgentRoleContext" {
             function Test-Path { param($Path) $true }
         }
 
-        It "uses default role and populates targetRepo and contextMessage" {
+        It "uses default role and populates roleName, targetRepo and contextMessage" {
             $result = & $script -cwd "C:/repos/myrepo"
+            $result.roleName       | Should -Be 'default'
             $result.roleDir        | Should -Be "$home/agentRoles/default"
             $result.targetRepo     | Should -Be "C:/repos/myrepo"
             $result.contextMessage | Should -BeLike "*C:/repos/myrepo*"
