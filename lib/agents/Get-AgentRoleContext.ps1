@@ -10,7 +10,7 @@ if (-not (Test-Path $roleDir)) {
 
 $targetRepo     = $null
 $contextMessage = $null
-if ($project -and $project.agentRole -and $project.root) {
+if ($project -and $project.root) {
     $targetRepo     = $project.root
     $contextMessage = "Your target repository for this session is at $($project.root). The launch directory is the agent-role dir (it carries your skills); treat $($project.root) as the repo you're working on."
 }

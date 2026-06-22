@@ -49,10 +49,11 @@ Describe "Get-AgentRoleContext" {
             function Test-Path { param($Path) $true }
         }
 
-        It "uses default role and returns null targetRepo" {
+        It "uses default role and populates targetRepo and contextMessage" {
             $result = & $script -cwd "C:/repos/myrepo"
-            $result.roleDir    | Should -Be "$home/agentRoles/default"
-            $result.targetRepo | Should -BeNull
+            $result.roleDir        | Should -Be "$home/agentRoles/default"
+            $result.targetRepo     | Should -Be "C:/repos/myrepo"
+            $result.contextMessage | Should -BeLike "*C:/repos/myrepo*"
         }
     }
 
