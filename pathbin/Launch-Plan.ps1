@@ -630,7 +630,10 @@ function normalizePath([string] $p) { $p -replace '\\', '/' }
 
 function writeLaunchIntent([string] $planFile, [string] $cwd) {
     $null = New-Item -ItemType Directory $runningDir -Force
-    [pscustomobject]@{planFile = $planFile; cwd = $cwd} |
+    # Store the role dir as cwd — that's what the session reports once Invoke-AgentSession
+    # does Push-Location $roleDir before launching.
+    $roleDir = (& "$home/prefs/lib/agents/Get-AgentRoleContext.ps1" -cwd $cwd).roleDir
+    [pscustomobject]@{planFile = $planFile; cwd = $roleDir} |
         ConvertTo-Json -Compress |
         Set-Content "$runningDir/launch_intent.json" -Encoding UTF8
 }

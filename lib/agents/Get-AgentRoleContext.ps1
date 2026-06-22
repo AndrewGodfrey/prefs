@@ -2,7 +2,7 @@ param([string] $cwd)
 
 $project   = Get-PratProject $cwd
 $agentRole = if ($project -and $project.agentRole) { $project.agentRole } else { 'default' }
-$roleDir   = "$home/agentRoles/$agentRole"
+$roleDir   = ("$home/agentRoles/$agentRole") -replace '\\', '/'
 
 if (-not (Test-Path $roleDir)) {
     throw "Agent role dir not found: $roleDir (has 'd' been run since the roles change?)"

@@ -9,9 +9,10 @@ Describe "Get-AgentRoleContext" {
             function Test-Path { param($Path) $true }
         }
 
-        It "returns default roleDir" {
+        It "returns default roleDir with forward slashes" {
             $result = & $script -cwd "C:/some/project"
-            $result.roleDir | Should -Be "$home/agentRoles/default"
+            $result.roleDir | Should -BeLike "*/agentRoles/default"
+            $result.roleDir | Should -Not -Match '\\'
         }
 
         It "returns roleName 'default'" {
@@ -32,9 +33,10 @@ Describe "Get-AgentRoleContext" {
             function Test-Path { param($Path) $true }
         }
 
-        It "returns role-specific roleDir" {
+        It "returns role-specific roleDir with forward slashes" {
             $result = & $script -cwd "C:/repos/myrepo"
-            $result.roleDir | Should -Be "$home/agentRoles/myrole"
+            $result.roleDir | Should -BeLike "*/agentRoles/myrole"
+            $result.roleDir | Should -Not -Match '\\'
         }
 
         It "returns roleName from agentRole" {
@@ -62,7 +64,7 @@ Describe "Get-AgentRoleContext" {
         It "uses default role and populates roleName, targetRepo and contextMessage" {
             $result = & $script -cwd "C:/repos/myrepo"
             $result.roleName       | Should -Be 'default'
-            $result.roleDir        | Should -Be "$home/agentRoles/default"
+            $result.roleDir        | Should -BeLike "*/agentRoles/default"
             $result.targetRepo     | Should -Be "C:/repos/myrepo"
             $result.contextMessage | Should -BeLike "*C:/repos/myrepo*"
         }

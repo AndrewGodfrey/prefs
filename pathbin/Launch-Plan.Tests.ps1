@@ -754,6 +754,45 @@ Describe "getPlanTitle" {
     }
 }
 
+Describe "writeLaunchIntent" {
+    It "writes planFile and default role dir as cwd when no project" {
+        function Get-PratProject { param($Location) $null }
+        function Test-Path { param($Path) $true }
+        $runningDir = (New-Item "TestDrive:/running-wi1" -ItemType Directory).FullName
+        writeLaunchIntent "C:/plans/foo.md" "C:/some/project"
+        $json = Get-Content "$runningDir/launch_intent.json" -Raw | ConvertFrom-Json
+        $json.planFile | Should -Be "C:/plans/foo.md"
+        $json.cwd      | Should -BeLike "*/agentRoles/default"
+    }
+
+    It "uses role-specific dir as cwd when project has agentRole" {
+        function Get-PratProject { param($Location) @{ agentRole = 'myrole' } }
+        function Test-Path { param($Path) $true }
+        $runningDir = (New-Item "TestDrive:/running-wi2" -ItemType Directory).FullName
+        writeLaunchIntent "C:/plans/foo.md" "C:/repo"
+        $json = Get-Content "$runningDir/launch_intent.json" -Raw | ConvertFrom-Json
+        $json.cwd | Should -BeLike "*/agentRoles/myrole"
+    }
+
+    It "uses default role dir when project has no agentRole" {
+        function Get-PratProject { param($Location) @{ root = 'C:/repo' } }
+        function Test-Path { param($Path) $true }
+        $runningDir = (New-Item "TestDrive:/running-wi3" -ItemType Directory).FullName
+        writeLaunchIntent "C:/plans/foo.md" "C:/repo"
+        $json = Get-Content "$runningDir/launch_intent.json" -Raw | ConvertFrom-Json
+        $json.cwd | Should -BeLike "*/agentRoles/default"
+    }
+
+    It "cwd uses forward slashes" {
+        function Get-PratProject { param($Location) $null }
+        function Test-Path { param($Path) $true }
+        $runningDir = (New-Item "TestDrive:/running-wi4" -ItemType Directory).FullName
+        writeLaunchIntent "C:/plans/foo.md" "C:/some/project"
+        $json = Get-Content "$runningDir/launch_intent.json" -Raw | ConvertFrom-Json
+        $json.cwd | Should -Not -Match '\\'
+    }
+}
+
 Describe "pickSessionId" {
     BeforeEach {
         Mock Write-Host { }
