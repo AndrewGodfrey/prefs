@@ -24,7 +24,23 @@ try {
             }
             & $LaunchHook $resumeSid ($claudeArgs + $ARGS)
         }
-        'copilot' { & $LaunchHook $resumeSid ($ctxArgs + $ARGS) }
+        'copilot' {
+            $ctxDir = $null
+            if ($Context.contextMessage) {
+                $ctxDir = Join-Path $env:TEMP "copilot-ctx-$([guid]::NewGuid().ToString('N'))"
+                New-Item -ItemType Directory -Path $ctxDir -Force | Out-Null
+                $Context.contextMessage | Set-Content (Join-Path $ctxDir 'session-context.instructions.md') -Encoding utf8
+                $env:COPILOT_CUSTOM_INSTRUCTIONS_DIRS = $ctxDir
+            }
+            try {
+                & $LaunchHook $resumeSid ($ctxArgs + $ARGS)
+            } finally {
+                if ($ctxDir) {
+                    Remove-Variable -Name COPILOT_CUSTOM_INSTRUCTIONS_DIRS -Scope env -ErrorAction SilentlyContinue
+                    Remove-Item $ctxDir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+        }
         default   { throw "Unknown harness: $Harness" }
     }
 } finally {
