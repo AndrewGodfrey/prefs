@@ -1,44 +1,21 @@
 param($installationTracker, [string[]] $Suppress = @())
 
-# Compute the new contents of MarkText's preferences.json given its current contents
-# ($null/empty if the file doesn't yet exist). Returns $null if no update is needed.
-# Pre-creating the file with just our setting lets MarkText pick it up on first launch,
-# avoiding the chicken-and-egg where settings only apply after MarkText has run once.
-function Get-MarkTextPreferencesUpdate([string] $existingJson) {
-    $targetLineWidth = '100%'
-    if ([string]::IsNullOrWhiteSpace($existingJson)) {
-        return ([ordered]@{ editorLineWidth = $targetLineWidth } | ConvertTo-Json -Depth 20)
-    }
-    $prefs = $existingJson | ConvertFrom-Json -Depth 20
-    if ($prefs.editorLineWidth -eq $targetLineWidth) {
-        return $null
-    }
-    $prefs.editorLineWidth = $targetLineWidth
-    return ($prefs | ConvertTo-Json -Depth 20)
-}
-
 if ($MyInvocation.InvocationName -ne ".") {
-    foreach ($packageId in @("pwsh", "wget", "df", "ditto", "sysinternals", "claude", "gh", "python", "nuget", "powertoys", "marktext")) {
+    foreach ($packageId in @("pwsh", "wget", "df", "ditto", "sysinternals", "claude", "gh", "python", "nuget", "powertoys")) {
         if ("pkg/$packageId" -notin $Suppress) {
             Install-PratPackage $installationTracker $packageId
         }
     }
 
 
-    if ("pkg/marktext" -notin $Suppress) {
-        $stage = $installationTracker.StartStage('marktext-settings')
-        Install-InteractiveAlias $stage 'mt' "$home\AppData\Local\Programs\MarkText\MarkText.exe"
-        $prefsFile = "$env:APPDATA/marktext/preferences.json"
-        $existingContent = if (Test-Path $prefsFile) { Get-Content $prefsFile -Raw } else { $null }
-        $newContent = Get-MarkTextPreferencesUpdate $existingContent
-        if ($null -ne $newContent) {
-            $prefsDir = Split-Path $prefsFile -Parent
-            if (!(Test-Path $prefsDir)) { New-Item -ItemType Directory -Path $prefsDir | Out-Null }
-            Set-Content $prefsFile -Value $newContent -Encoding utf8NoBOM
-            Write-Host "Updated MarkText preferences (editorLineWidth=100%)"
-        }
-        $installationTracker.EndStage($stage)
+    $stage = $installationTracker.StartStage('marktext-uninstall')
+    $stage.NoteMigrationStep((Get-Date "2026-06-23"))
+    Remove-InteractiveAlias $stage 'mt'
+    if (Test-Path "$home\AppData\Local\Programs\MarkText\MarkText.exe") {
+        $stage.OnChange()
+        winget uninstall --id MarkText.MarkText --silent
     }
+    $installationTracker.EndStage($stage)
 
     if ("pkg/winmerge" -notin $Suppress) {
         # WinMerge: used for move-block detection when reviewing Claude-assisted reorganizations.
