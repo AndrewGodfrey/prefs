@@ -36,7 +36,7 @@ try {
                 & $LaunchHook $resumeSid ($ctxArgs + $ARGS)
             } finally {
                 if ($ctxDir) {
-                    Remove-Variable -Name COPILOT_CUSTOM_INSTRUCTIONS_DIRS -Scope env -ErrorAction SilentlyContinue
+                    Remove-Item Env:\COPILOT_CUSTOM_INSTRUCTIONS_DIRS -ErrorAction SilentlyContinue
                     Remove-Item $ctxDir -Recurse -Force -ErrorAction SilentlyContinue
                 }
             }
