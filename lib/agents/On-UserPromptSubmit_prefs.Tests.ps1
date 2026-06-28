@@ -82,7 +82,9 @@ Describe "Update-CredentialsIfExpiring" {
         $calls.Clear()
         $testDir = "TestDrive:\creds-$([Guid]::NewGuid())"
         New-Item -ItemType Directory $testDir | Out-Null
-        $script:credsPath = "$(((Get-Item $testDir).FullName -replace '\\', '/').TrimEnd('/'))/.credentials.json"
+        $base = ((Get-Item $testDir).FullName -replace '\\', '/').TrimEnd('/')
+        $script:credsPath = "$base/.credentials.json"
+        $script:logPath   = "$base/token_refresh.log"
     }
 
     Context "fast path — token valid with >10 min remaining" {
@@ -90,7 +92,7 @@ Describe "Update-CredentialsIfExpiring" {
             $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
             Write-CredFile $script:credsPath 'orig-access' 'orig-refresh' ($nowMs + 20 * 60 * 1000)
 
-            Update-CredentialsIfExpiring -CredsPath $script:credsPath
+            Update-CredentialsIfExpiring -CredsPath $script:credsPath -LogPath $script:logPath
 
             $calls.Count | Should -Be 0
         }
@@ -100,7 +102,7 @@ Describe "Update-CredentialsIfExpiring" {
             Write-CredFile $script:credsPath 'orig-access' 'orig-refresh' ($nowMs + 20 * 60 * 1000)
             $before = Get-Content $script:credsPath -Raw
 
-            Update-CredentialsIfExpiring -CredsPath $script:credsPath
+            Update-CredentialsIfExpiring -CredsPath $script:credsPath -LogPath $script:logPath
 
             (Get-Content $script:credsPath -Raw) | Should -Be $before
         }
@@ -113,14 +115,14 @@ Describe "Update-CredentialsIfExpiring" {
         }
 
         It "calls the token endpoint" {
-            Update-CredentialsIfExpiring -CredsPath $script:credsPath -TokenEndpoint 'https://example.com/token'
+            Update-CredentialsIfExpiring -CredsPath $script:credsPath -LogPath $script:logPath -TokenEndpoint 'https://example.com/token'
 
             $calls.Count | Should -Be 1
             $calls[0].Uri | Should -Be 'https://example.com/token'
         }
 
         It "sends the existing refresh token and client_id in the request body" {
-            Update-CredentialsIfExpiring -CredsPath $script:credsPath -ClientId 'test-client'
+            Update-CredentialsIfExpiring -CredsPath $script:credsPath -LogPath $script:logPath -ClientId 'test-client'
 
             $calls[0].Body.refresh_token | Should -Be 'orig-refresh'
             $calls[0].Body.client_id     | Should -Be 'test-client'
@@ -128,14 +130,14 @@ Describe "Update-CredentialsIfExpiring" {
         }
 
         It "writes the new access token" {
-            Update-CredentialsIfExpiring -CredsPath $script:credsPath
+            Update-CredentialsIfExpiring -CredsPath $script:credsPath -LogPath $script:logPath
 
             $updated = (Get-Content $script:credsPath -Raw | ConvertFrom-Json).claudeAiOauth
             $updated.accessToken | Should -Be 'new-access'
         }
 
         It "writes the new refresh token" {
-            Update-CredentialsIfExpiring -CredsPath $script:credsPath
+            Update-CredentialsIfExpiring -CredsPath $script:credsPath -LogPath $script:logPath
 
             $updated = (Get-Content $script:credsPath -Raw | ConvertFrom-Json).claudeAiOauth
             $updated.refreshToken | Should -Be 'new-refresh'
@@ -143,7 +145,7 @@ Describe "Update-CredentialsIfExpiring" {
 
         It "writes a future expiresAt (approximately now + expires_in)" {
             $before = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-            Update-CredentialsIfExpiring -CredsPath $script:credsPath
+            Update-CredentialsIfExpiring -CredsPath $script:credsPath -LogPath $script:logPath
             $after = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 
             $updated = (Get-Content $script:credsPath -Raw | ConvertFrom-Json).claudeAiOauth
@@ -157,7 +159,7 @@ Describe "Update-CredentialsIfExpiring" {
             $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
             Write-CredFile $script:credsPath 'orig-access' 'orig-refresh' ($nowMs - 1000)
 
-            Update-CredentialsIfExpiring -CredsPath $script:credsPath
+            Update-CredentialsIfExpiring -CredsPath $script:credsPath -LogPath $script:logPath
 
             $calls.Count | Should -Be 1
         }
@@ -172,7 +174,7 @@ Describe "Update-CredentialsIfExpiring" {
             $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
             Write-CredFile $script:credsPath 'orig-access' 'orig-refresh' ($nowMs - 1000)
 
-            Update-CredentialsIfExpiring -CredsPath $script:credsPath
+            Update-CredentialsIfExpiring -CredsPath $script:credsPath -LogPath $script:logPath
 
             $updated = (Get-Content $script:credsPath -Raw | ConvertFrom-Json).claudeAiOauth
             $updated.refreshToken | Should -Be 'orig-refresh'
@@ -181,7 +183,7 @@ Describe "Update-CredentialsIfExpiring" {
 
     Context "credentials file missing" {
         It "does not throw and makes no HTTP call" {
-            { Update-CredentialsIfExpiring -CredsPath 'C:/nonexistent/.credentials.json' } | Should -Not -Throw
+            { Update-CredentialsIfExpiring -CredsPath 'C:/nonexistent/.credentials.json' -LogPath $script:logPath } | Should -Not -Throw
 
             $calls.Count | Should -Be 0
         }
@@ -192,7 +194,7 @@ Describe "Update-CredentialsIfExpiring" {
             $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
             Write-CredFile $script:credsPath 'orig-access' $null ($nowMs - 1000)
 
-            Update-CredentialsIfExpiring -CredsPath $script:credsPath
+            Update-CredentialsIfExpiring -CredsPath $script:credsPath -LogPath $script:logPath
 
             $calls.Count | Should -Be 0
         }
@@ -205,7 +207,7 @@ Describe "Update-CredentialsIfExpiring" {
             Write-CredFile $script:credsPath 'orig-access' 'orig-refresh' ($nowMs - 1000)
             $before = Get-Content $script:credsPath -Raw
 
-            { Update-CredentialsIfExpiring -CredsPath $script:credsPath } | Should -Not -Throw
+            { Update-CredentialsIfExpiring -CredsPath $script:credsPath -LogPath $script:logPath } | Should -Not -Throw
 
             (Get-Content $script:credsPath -Raw) | Should -Be $before
         }

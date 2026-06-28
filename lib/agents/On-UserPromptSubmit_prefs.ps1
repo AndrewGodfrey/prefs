@@ -13,17 +13,35 @@ function main($hookData, [string] $harnessName) {
 function Update-CredentialsIfExpiring(
     [string] $CredsPath     = "$home/.claude/.credentials.json",
     [string] $TokenEndpoint = 'https://platform.claude.com/v1/oauth/token',
-    [string] $ClientId      = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
+    [string] $ClientId      = '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
+    [string] $LogPath       = 'C:/tmp/cc_token_refresh.log'
 ) {
-    if (-not (Test-Path $CredsPath)) { return }
+    $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $ts    = [DateTimeOffset]::UtcNow.ToString('o')
+
+    if (-not (Test-Path $CredsPath)) {
+        Add-Content $LogPath "$ts  SKIP  no credentials file"
+        return
+    }
 
     $creds = Get-Content $CredsPath -Raw | ConvertFrom-Json
     $oauth = $creds.claudeAiOauth
-    if (-not $oauth -or -not $oauth.refreshToken) { return }
-    if (-not $oauth.expiresAt) { return }
+    if (-not $oauth -or -not $oauth.refreshToken) {
+        Add-Content $LogPath "$ts  SKIP  no refreshToken in credentials"
+        return
+    }
+    if (-not $oauth.expiresAt) {
+        Add-Content $LogPath "$ts  SKIP  no expiresAt in credentials"
+        return
+    }
 
-    $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-    if ([long]$oauth.expiresAt -gt ($nowMs + 10 * 60 * 1000)) { return }
+    $minsRemaining = [math]::Round(([long]$oauth.expiresAt - $nowMs) / 60000, 1)
+    if ([long]$oauth.expiresAt -gt ($nowMs + 10 * 60 * 1000)) {
+        Add-Content $LogPath "$ts  OK    ${minsRemaining}min remaining, no refresh needed"
+        return
+    }
+
+    Add-Content $LogPath "$ts  REFRESH  ${minsRemaining}min remaining, attempting refresh"
 
     $body = [ordered]@{
         grant_type    = 'refresh_token'
@@ -39,8 +57,9 @@ function Update-CredentialsIfExpiring(
             $creds.claudeAiOauth.refreshToken = $r.refresh_token
         }
         $creds | ConvertTo-Json -Depth 10 | Set-Content $CredsPath -Encoding UTF8
+        Add-Content $LogPath "$ts  REFRESHED  new expiry in $($r.expires_in)s"
     } catch {
-        # Silent — don't end the hook or block the turn, on failure to refresh credentials
+        Add-Content $LogPath "$ts  ERROR  $_"
     }
 }
 
