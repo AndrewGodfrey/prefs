@@ -90,6 +90,13 @@ the tree is clean and on the main branch and if so, `git pull` (that case is non
 Alternatively, read live from the remote (methods vary by environment).
 Failing both: Flag the staleness before doing the work, not after.
 
+### Git tooling — I use fork.dev, not the git CLI
+
+For git state operations (staging, committing, resetting) I use fork.dev, not the git CLI. Don't claim
+that an untracked file "won't interfere" with a pending git operation: fork.dev's "select all" includes
+untracked files, so a stray untracked file *can* get swept into a commit. More generally, don't reason
+about my git workflow as if I drive it from the command line.
+
 ### Investigation mode
 
 When investigating (asking "what's going on", looking at logs, tracing a bug), default to deepening
