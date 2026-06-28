@@ -10,7 +10,7 @@ for ($i = 0; $i -lt $ARGS.Count - 1; $i++) {
 }
 
 $ctxArgs = @()
-if ($Context.targetRepo) {
+if ($Context.targetRepo -and $Harness -ne 'pi') {
     $ctxArgs = @('--add-dir', $Context.targetRepo)
 }
 
@@ -41,6 +41,14 @@ try {
                 }
             }
         }
+        'pi' {
+            $piArgs = $ctxArgs
+            if ($Context.contextMessage) {
+                $piArgs = $piArgs + @('--append-system-prompt', $Context.contextMessage, '--skill', './.claude/skills/')
+            }
+            & $LaunchHook $resumeSid ($piArgs + $ARGS)
+        }
+
         default   { throw "Unknown harness: $Harness" }
     }
 } finally {

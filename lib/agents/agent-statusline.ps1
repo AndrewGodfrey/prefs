@@ -80,7 +80,5 @@ if ($MyInvocation.InvocationName -ne '.') {
         }
     }
 
-    $shouldWarn = & (Resolve-PratLibFile "lib/agents/Get-ShouldWarnOutsideSandbox.ps1")
-    $sandbox = if ($shouldWarn) { '⚠️ ' } else { '' }
-    Write-Host "$sandbox$bar$loc$rlStr"
+    Write-Host "$bar$loc$rlStr"
 }
