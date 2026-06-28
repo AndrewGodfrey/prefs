@@ -61,6 +61,157 @@ Describe "getIntentPlanFile" {
     }
 }
 
+Describe "Update-CredentialsIfExpiring" {
+    BeforeAll {
+        $calls = [System.Collections.Generic.List[hashtable]]::new()
+
+        function Invoke-RestMethod {
+            param($Uri, $Method, $ContentType, $Body)
+            $calls.Add(@{ Uri = $Uri; Body = ($Body | ConvertFrom-Json) })
+            return [PSCustomObject]@{ access_token = 'new-access'; refresh_token = 'new-refresh'; expires_in = 3600 }
+        }
+
+        function Write-CredFile($path, $accessToken, $refreshToken, $expiresAtMs) {
+            $oauth = [ordered]@{ accessToken = $accessToken; expiresAt = $expiresAtMs }
+            if ($null -ne $refreshToken) { $oauth['refreshToken'] = $refreshToken }
+            @{ claudeAiOauth = $oauth } | ConvertTo-Json -Depth 5 | Set-Content $path -Encoding UTF8
+        }
+    }
+
+    BeforeEach {
+        $calls.Clear()
+        $testDir = "TestDrive:\creds-$([Guid]::NewGuid())"
+        New-Item -ItemType Directory $testDir | Out-Null
+        $script:credsPath = "$(((Get-Item $testDir).FullName -replace '\\', '/').TrimEnd('/'))/.credentials.json"
+    }
+
+    Context "fast path — token valid with >10 min remaining" {
+        It "makes no HTTP call" {
+            $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            Write-CredFile $script:credsPath 'orig-access' 'orig-refresh' ($nowMs + 20 * 60 * 1000)
+
+            Update-CredentialsIfExpiring -CredsPath $script:credsPath
+
+            $calls.Count | Should -Be 0
+        }
+
+        It "leaves the file unchanged" {
+            $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            Write-CredFile $script:credsPath 'orig-access' 'orig-refresh' ($nowMs + 20 * 60 * 1000)
+            $before = Get-Content $script:credsPath -Raw
+
+            Update-CredentialsIfExpiring -CredsPath $script:credsPath
+
+            (Get-Content $script:credsPath -Raw) | Should -Be $before
+        }
+    }
+
+    Context "token near expiry (<= 10 min remaining)" {
+        BeforeEach {
+            $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            Write-CredFile $script:credsPath 'orig-access' 'orig-refresh' ($nowMs + 5 * 60 * 1000)
+        }
+
+        It "calls the token endpoint" {
+            Update-CredentialsIfExpiring -CredsPath $script:credsPath -TokenEndpoint 'https://example.com/token'
+
+            $calls.Count | Should -Be 1
+            $calls[0].Uri | Should -Be 'https://example.com/token'
+        }
+
+        It "sends the existing refresh token and client_id in the request body" {
+            Update-CredentialsIfExpiring -CredsPath $script:credsPath -ClientId 'test-client'
+
+            $calls[0].Body.refresh_token | Should -Be 'orig-refresh'
+            $calls[0].Body.client_id     | Should -Be 'test-client'
+            $calls[0].Body.grant_type    | Should -Be 'refresh_token'
+        }
+
+        It "writes the new access token" {
+            Update-CredentialsIfExpiring -CredsPath $script:credsPath
+
+            $updated = (Get-Content $script:credsPath -Raw | ConvertFrom-Json).claudeAiOauth
+            $updated.accessToken | Should -Be 'new-access'
+        }
+
+        It "writes the new refresh token" {
+            Update-CredentialsIfExpiring -CredsPath $script:credsPath
+
+            $updated = (Get-Content $script:credsPath -Raw | ConvertFrom-Json).claudeAiOauth
+            $updated.refreshToken | Should -Be 'new-refresh'
+        }
+
+        It "writes a future expiresAt (approximately now + expires_in)" {
+            $before = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            Update-CredentialsIfExpiring -CredsPath $script:credsPath
+            $after = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+
+            $updated = (Get-Content $script:credsPath -Raw | ConvertFrom-Json).claudeAiOauth
+            $updated.expiresAt | Should -BeGreaterThan $before
+            $updated.expiresAt | Should -BeLessOrEqual ($after + 3600 * 1000)
+        }
+    }
+
+    Context "token already expired" {
+        It "refreshes" {
+            $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            Write-CredFile $script:credsPath 'orig-access' 'orig-refresh' ($nowMs - 1000)
+
+            Update-CredentialsIfExpiring -CredsPath $script:credsPath
+
+            $calls.Count | Should -Be 1
+        }
+    }
+
+    Context "response has no new refresh_token" {
+        It "preserves the original refresh token" {
+            function Invoke-RestMethod {
+                param($Uri, $Method, $ContentType, $Body)
+                return [PSCustomObject]@{ access_token = 'new-access'; expires_in = 3600 }
+            }
+            $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            Write-CredFile $script:credsPath 'orig-access' 'orig-refresh' ($nowMs - 1000)
+
+            Update-CredentialsIfExpiring -CredsPath $script:credsPath
+
+            $updated = (Get-Content $script:credsPath -Raw | ConvertFrom-Json).claudeAiOauth
+            $updated.refreshToken | Should -Be 'orig-refresh'
+        }
+    }
+
+    Context "credentials file missing" {
+        It "does not throw and makes no HTTP call" {
+            { Update-CredentialsIfExpiring -CredsPath 'C:/nonexistent/.credentials.json' } | Should -Not -Throw
+
+            $calls.Count | Should -Be 0
+        }
+    }
+
+    Context "refreshToken missing from credentials" {
+        It "makes no HTTP call" {
+            $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            Write-CredFile $script:credsPath 'orig-access' $null ($nowMs - 1000)
+
+            Update-CredentialsIfExpiring -CredsPath $script:credsPath
+
+            $calls.Count | Should -Be 0
+        }
+    }
+
+    Context "HTTP call fails" {
+        It "does not throw and leaves the file unchanged" {
+            function Invoke-RestMethod { param($Uri, $Method, $ContentType, $Body); throw 'network error' }
+            $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            Write-CredFile $script:credsPath 'orig-access' 'orig-refresh' ($nowMs - 1000)
+            $before = Get-Content $script:credsPath -Raw
+
+            { Update-CredentialsIfExpiring -CredsPath $script:credsPath } | Should -Not -Throw
+
+            (Get-Content $script:credsPath -Raw) | Should -Be $before
+        }
+    }
+}
+
 Describe "Get-HarnessPid" {
     Context "harness process not running" {
         BeforeAll {

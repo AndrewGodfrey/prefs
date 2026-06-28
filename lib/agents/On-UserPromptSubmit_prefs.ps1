@@ -6,24 +6,64 @@
 function main($hookData, [string] $harnessName) {
     define_Proc
     Save-PidSessionRecord $hookData $harnessName
+    Update-CredentialsIfExpiring
+}
+
+# This is to work around a bug in Claude Code, where you get an unnecessary login prompt in a long-running session.
+function Update-CredentialsIfExpiring(
+    [string] $CredsPath     = "$home/.claude/.credentials.json",
+    [string] $TokenEndpoint = 'https://platform.claude.com/v1/oauth/token',
+    [string] $ClientId      = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
+) {
+    if (-not (Test-Path $CredsPath)) { return }
+
+    $creds = Get-Content $CredsPath -Raw | ConvertFrom-Json
+    $oauth = $creds.claudeAiOauth
+    if (-not $oauth -or -not $oauth.refreshToken) { return }
+    if (-not $oauth.expiresAt) { return }
+
+    $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    if ([long]$oauth.expiresAt -gt ($nowMs + 10 * 60 * 1000)) { return }
+
+    $body = [ordered]@{
+        grant_type    = 'refresh_token'
+        refresh_token = $oauth.refreshToken
+        client_id     = $ClientId
+    } | ConvertTo-Json -Compress
+
+    try {
+        $r = Invoke-RestMethod -Uri $TokenEndpoint -Method Post -ContentType 'application/json' -Body $body
+        $creds.claudeAiOauth.accessToken = $r.access_token
+        $creds.claudeAiOauth.expiresAt   = $nowMs + [long]($r.expires_in * 1000)
+        if ($r.PSObject.Properties['refresh_token'] -and $r.refresh_token) {
+            $creds.claudeAiOauth.refreshToken = $r.refresh_token
+        }
+        $creds | ConvertTo-Json -Depth 10 | Set-Content $CredsPath -Encoding UTF8
+    } catch {
+        # Silent — don't end the hook or block the turn, on failure to refresh credentials
+    }
 }
 
 function Save-PidSessionRecord($hookData, [string] $harnessName) {
-    $sessionId = $hookData.session_id
-    $cwd       = $hookData.cwd
-    if (-not $sessionId -or -not $cwd) { return }
+    try {
+        $sessionId = $hookData.session_id
+        $cwd       = $hookData.cwd
+        if (-not $sessionId -or -not $cwd) { return }
 
-    $harnessPid = Get-HarnessPid $harnessName
-    if (-not $harnessPid) { return }
+        $harnessPid = Get-HarnessPid $harnessName
+        if (-not $harnessPid) { return }
 
-    $runningDir = "$home/prat/auto/context/running"
-    $intentPath = "$runningDir/launch_intent.json"
-    $planFile   = getIntentPlanFile $cwd $intentPath
+        $runningDir = "$home/prat/auto/context/running"
+        $intentPath = "$runningDir/launch_intent.json"
+        $planFile   = getIntentPlanFile $cwd $intentPath
 
-    $null = New-Item -ItemType Directory -Path $runningDir -Force
-    $data = [pscustomobject]@{session_id = $sessionId; cwd = $cwd}
-    if ($planFile) { $data | Add-Member -NotePropertyName 'planFile' -NotePropertyValue $planFile }
-    ConvertTo-Json -InputObject $data -Compress | Set-Content "$runningDir/pid_$harnessPid.txt" -Encoding UTF8
+        $null = New-Item -ItemType Directory -Path $runningDir -Force
+        $data = [pscustomobject]@{session_id = $sessionId; cwd = $cwd}
+        if ($planFile) { $data | Add-Member -NotePropertyName 'planFile' -NotePropertyValue $planFile }
+        ConvertTo-Json -InputObject $data -Compress | Set-Content "$runningDir/pid_$harnessPid.txt" -Encoding UTF8
+    } catch {
+        # Silent — don't end the hook or block the turn, on failure to record the PID/session mapping.
+    }
 }
 
 function normalizePath([string] $p) { $p -replace '\\', '/' }
