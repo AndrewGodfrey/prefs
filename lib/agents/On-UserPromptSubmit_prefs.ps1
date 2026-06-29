@@ -14,7 +14,9 @@ function Update-CredentialsIfExpiring(
     [string] $CredsPath     = "$home/.claude/.credentials.json",
     [string] $TokenEndpoint = 'https://platform.claude.com/v1/oauth/token',
     [string] $ClientId      = '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
-    [string] $LogPath       = 'C:/tmp/cc_token_refresh.log'
+    [string] $LogPath       = 'C:/tmp/cc_token_refresh.log',
+    [string] $BackoffPath   = 'C:/tmp/cc_token_refresh_backoff.txt',
+    [int]    $BackoffMins   = 5
 ) {
     $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
     $ts    = [DateTimeOffset]::UtcNow.ToString('o')
@@ -41,7 +43,18 @@ function Update-CredentialsIfExpiring(
         return
     }
 
+    if (Test-Path $BackoffPath) {
+        $nextAllowedMs = [long](Get-Content $BackoffPath -Raw).Trim()
+        if ($nowMs -lt $nextAllowedMs) {
+            $waitMins = [math]::Round(($nextAllowedMs - $nowMs) / 60000, 1)
+            Add-Content $LogPath "$ts  BACKOFF  ${minsRemaining}min remaining, next attempt in ${waitMins}min"
+            return
+        }
+    }
+
     Add-Content $LogPath "$ts  REFRESH  ${minsRemaining}min remaining, attempting refresh"
+    $nextAllowed = $nowMs + $BackoffMins * 60 * 1000
+    Set-Content $BackoffPath "$nextAllowed" -Encoding UTF8
 
     $body = [ordered]@{
         grant_type    = 'refresh_token'
@@ -57,6 +70,7 @@ function Update-CredentialsIfExpiring(
             $creds.claudeAiOauth.refreshToken = $r.refresh_token
         }
         $creds | ConvertTo-Json -Depth 10 | Set-Content $CredsPath -Encoding UTF8
+        Remove-Item $BackoffPath -ErrorAction SilentlyContinue
         Add-Content $LogPath "$ts  REFRESHED  new expiry in $($r.expires_in)s"
     } catch {
         Add-Content $LogPath "$ts  ERROR  $_"
