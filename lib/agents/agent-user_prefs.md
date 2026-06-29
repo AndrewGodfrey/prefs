@@ -47,6 +47,10 @@ has already weighed that.
 
 Prefer short sessions with plan-file continuity over long sessions that rely on compaction.
 
+### Plan step pacing
+
+The user often evaluates between plan steps before proceeding — don't assume steps run back-to-back.
+
 ### Working-coordination plan docs are throwaway
 
 When we create a plan together to coordinate iterative work, with no audience beyond us and
