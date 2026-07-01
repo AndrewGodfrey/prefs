@@ -80,5 +80,8 @@ if ($MyInvocation.InvocationName -ne '.') {
         }
     }
 
-    Write-Host "$bar$loc$rlStr"
+    # Set by cl (Start-CommandLineAgent.ps1) at launch; absent for sessions not launched that way.
+    $sandboxWarn = if ($env:CL_SANDBOX_MODE -ne '1') { "⚠ " } else { '' }
+
+    Write-Host "$sandboxWarn$bar$loc$rlStr"
 }
