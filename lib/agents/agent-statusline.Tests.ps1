@@ -88,6 +88,37 @@ Describe "claude-statusline" {
         }
     }
 
+    Context "CL_LAUNCH_CWD precedence" {
+        It "prefers CL_LAUNCH_CWD over the json cwd when set" {
+            $jsonCwd   = Join-Path $env:TEMP "statusline-test-json-$([guid]::NewGuid().ToString('N'))"
+            $launchCwd = Join-Path $env:TEMP "statusline-test-launch-$([guid]::NewGuid().ToString('N'))"
+            New-Item -ItemType Directory -Path $jsonCwd, $launchCwd -Force | Out-Null
+            try {
+                $env:CL_LAUNCH_CWD = $launchCwd
+                $json = @{ context_window = @{ used_percentage = 10 }; cwd = $jsonCwd } | ConvertTo-Json
+                $out  = ($json | pwsh -NoProfile -File "$PSScriptRoot/agent-statusline.ps1") -join ''
+                $out | Should -Match ([regex]::Escape($launchCwd))
+                $out | Should -Not -Match ([regex]::Escape($jsonCwd))
+            } finally {
+                Remove-Item Env:\CL_LAUNCH_CWD -ErrorAction SilentlyContinue
+                Remove-Item $jsonCwd, $launchCwd -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        It "falls back to the json cwd when CL_LAUNCH_CWD is unset" {
+            $jsonCwd = Join-Path $env:TEMP "statusline-test-fallback-$([guid]::NewGuid().ToString('N'))"
+            New-Item -ItemType Directory -Path $jsonCwd -Force | Out-Null
+            try {
+                Remove-Item Env:\CL_LAUNCH_CWD -ErrorAction SilentlyContinue
+                $json = @{ context_window = @{ used_percentage = 10 }; cwd = $jsonCwd } | ConvertTo-Json
+                $out  = ($json | pwsh -NoProfile -File "$PSScriptRoot/agent-statusline.ps1") -join ''
+                $out | Should -Match ([regex]::Escape($jsonCwd))
+            } finally {
+                Remove-Item $jsonCwd -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
     Context "no rate limits" {
         It "no rl section when rate_limits absent" {
             $json = @{ context_window = @{ used_percentage = 10 }; cwd = $env:TEMP } | ConvertTo-Json

@@ -14,8 +14,15 @@ if ($Context.targetRepo -and $Harness -ne 'pi') {
     $ctxArgs = @('--add-dir', $Context.targetRepo)
 }
 
+$launchCwd = $PWD.Path
 Push-Location $Context.roleDir
+$envToken = @{}
 try {
+    $envToken = Set-EnvTemp @{
+        # Read by agent-statusline.ps1, so it can show where 'cl' was launched from rather than the role
+        # dir it pushes into above (Claude Code reports cwd as its process cwd, which is the role dir).
+        CL_LAUNCH_CWD = $launchCwd
+    }
     switch ($Harness) {
         'claude' {
             $claudeArgs = $ctxArgs
@@ -53,4 +60,5 @@ try {
     }
 } finally {
     Pop-Location
+    Restore-Env $envToken
 }

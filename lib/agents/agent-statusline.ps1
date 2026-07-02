@@ -69,7 +69,9 @@ if ($MyInvocation.InvocationName -ne '.') {
     # CWD in prompt format (mirrors On-PromptLocationChanged.ps1)
     $loc = ''
     if (-not $NoCwd) {
-        $cwd = $j.cwd
+        # Prefer the dir 'cl' was launched from over Claude Code's reported cwd, which is the role dir
+        # (see CL_LAUNCH_CWD in Invoke-AgentSession.ps1). Falls back to $j.cwd for non-'cl' sessions.
+        $cwd = if ($env:CL_LAUNCH_CWD) { $env:CL_LAUNCH_CWD } else { $j.cwd }
         $project = Get-PratProject $cwd -ErrorAction SilentlyContinue
         if ($project) {
             $subdir  = if ($project.subdir) { " $($project.subdir)/" -replace '\\', '/' } else { '' }
@@ -83,5 +85,8 @@ if ($MyInvocation.InvocationName -ne '.') {
     # Set by cl (Start-CommandLineAgent.ps1) at launch; absent for sessions not launched that way.
     $sandboxWarn = if ($env:CL_SANDBOX_MODE -ne '1') { "⚠ " } else { '' }
 
-    Write-Host "$sandboxWarn$bar$loc$rlStr"
+    # Model used for the last turn (Claude Code sends the model active for the response just completed)
+    $modelStr = if ($j.model.display_name) { "   ($($j.model.display_name))" } else { '' }
+
+    Write-Host "$sandboxWarn$bar$loc$rlStr$modelStr"
 }

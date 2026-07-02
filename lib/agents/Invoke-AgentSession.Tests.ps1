@@ -1,4 +1,7 @@
 BeforeAll {
+    # Invoke-AgentSession.ps1 calls Set-EnvTemp/Restore-Env assuming the caller's profile already
+    # loaded PratBase (true for the real 'cl' launch path) — the test process needs it explicitly.
+    Import-Module "$home/prat/lib/PratBase/PratBase.psd1" -Force
     $script = "$PSScriptRoot/Invoke-AgentSession.ps1"
 
     function New-MockCtx {
@@ -94,6 +97,49 @@ Describe "Invoke-AgentSession" {
             } finally {
                 Pop-Location
             }
+        }
+    }
+
+    Context "CL_LAUNCH_CWD env var" {
+        BeforeAll {
+            $roleDir  = (New-Item "TestDrive:/role-launchcwd" -ItemType Directory).FullName
+            $startDir = (New-Item "TestDrive:/start-launchcwd" -ItemType Directory).FullName
+            $ctx      = New-MockCtx -RoleDir $roleDir
+            $captured = @{}
+            $hook = { param($resumeSid, $allArgs) $captured.envDuringHook = $env:CL_LAUNCH_CWD }
+        }
+
+        BeforeEach {
+            Remove-Item Env:\CL_LAUNCH_CWD -ErrorAction SilentlyContinue
+        }
+
+        It "sets CL_LAUNCH_CWD to the pre-Push-Location dir during hook invocation" {
+            Push-Location $startDir
+            try {
+                & $script -Harness 'claude' -LaunchHook $hook -Context $ctx
+                $captured.envDuringHook | Should -Be $startDir
+            } finally {
+                Pop-Location
+            }
+        }
+
+        It "clears CL_LAUNCH_CWD after the hook returns" {
+            & $script -Harness 'claude' -LaunchHook $hook -Context $ctx
+            $env:CL_LAUNCH_CWD | Should -BeNullOrEmpty
+        }
+
+        It "does not leave CL_LAUNCH_CWD set when Push-Location fails" {
+            # Push-Location on a missing path is a non-terminating error by default — force it
+            # terminating (as e.g. a caller-set 'Stop' preference would) to exercise the failure path.
+            $badCtx = New-MockCtx -RoleDir "TestDrive:/does-not-exist"
+            $prevEap = $ErrorActionPreference
+            $ErrorActionPreference = 'Stop'
+            try {
+                { & $script -Harness 'claude' -LaunchHook $hook -Context $badCtx } | Should -Throw
+            } finally {
+                $ErrorActionPreference = $prevEap
+            }
+            $env:CL_LAUNCH_CWD | Should -BeNullOrEmpty
         }
     }
 
