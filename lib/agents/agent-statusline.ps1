@@ -83,7 +83,7 @@ if ($MyInvocation.InvocationName -ne '.') {
     }
 
     # Set by cl (Start-CommandLineAgent.ps1) at launch; absent for sessions not launched that way.
-    $sandboxWarn = if ($env:CL_SANDBOX_MODE -ne '1') { "⚠ " } else { '' }
+    $sandboxWarn = if ($env:CL_SANDBOX_MODE -ne '1') { "`e[38;2;255;200;0m*`e[0m " } else { '' }
 
     # Model used for the last turn (Claude Code sends the model active for the response just completed)
     $modelStr = if ($j.model.display_name) { "   ($($j.model.display_name))" } else { '' }
