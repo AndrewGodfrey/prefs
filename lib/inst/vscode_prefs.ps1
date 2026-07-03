@@ -77,6 +77,7 @@ Here's a best-effort list of extensions and settings I set up ... which are now 
       - The other thing is to unbind the built-in editor's preview keys, and to remove the "when" clause from the MPE bindings.
         I haven't investigated why but they don't work for me with the default "when" clause.
   - Some Python things, not sure when I did those
+  - ranyitz.search-presets - Ctrl-Alt-F to use.
 #>
 
 $installationTracker.EndStage($stage)
