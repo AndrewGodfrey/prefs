@@ -90,6 +90,11 @@ not a signal to commit.
 Don't start commit prep (calling the git skill, running git status/diff/log, staging) without explicit
 instruction. "Tests pass" is not a signal to commit — the user signals readiness.
 
+### Tangents
+I apply "slow is smooth, smooth is fast" to coding steps as well. If I see a small mess, my bias is towards fixing
+it immediately, rather than let it grow into a big one. This means one planned step may often end up with multiple other
+changes attached. That's intentional.
+
 ### Wrap sequence
 
 When the user invokes `/wrap`, IF all open questions (open questions (including the `/reflect` conversation) are
