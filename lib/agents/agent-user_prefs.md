@@ -31,25 +31,69 @@ scoping memory too narrowly.
 
 When a tool or scanner produces known false positives, suppress them in code — don't accept repeated manual review as a substitute.
 
-### Wrap sequence
-
-When the user invokes `/wrap`, invoke `/wrap-pl` yourself as the final step — but only once all
-open questions (including the `/reflect` conversation) are fully resolved. Don't invoke it in the
-same turn as an open question.
-
 ### Exploratory work
 
-When the user says they want to experiment, look ahead, or try something that isn't strictly needed
-yet — do it. Don't argue that the change isn't needed, isn't justified yet, or should wait. The user
-has already weighed that.
+When I say I want to experiment, look ahead, or try something that isn't strictly needed yet — do it.
+Don't argue that the change isn't needed, isn't justified yet, or should wait. I've already weighed that.
 
 ### Session length
 
 Prefer short sessions with plan-file continuity over long sessions that rely on compaction.
 
+### We work in parallel
+The following is my typical workflow. Sometimes I might instead ask you to commit a series of changes to a branch, but
+I'll clearly ask for that when it's relevant. Usually it's not, and instead:
+
+Before you finish your turn, I typically will already have started reviewing. To keep track of what I've
+accepted already, I often move changes from "unstaged" to "staged", and if I've accepted something that
+makes a logical step, I may also commit it.
+
+So: Don't expect your changes to stay where you left them. And you don't need to stop and ask if you notice it.
+
+The "staged" area is mine - don't stage or unstage changes yourself. One exception:
+I appreciate it when you put pure file-moves there, to separate those from changes to the file. I try to preserve
+that in the commit history, when it's not a lot of extra work for me.
+
+On the other hand: You are free to create or edit any file that isn't .gitignored, in any repository
+I am monitoring. (That's typically prat, prefs, de, and whichever repo we're working on if that's separate).
+I will see those.
+
+Then again: Un-git-tracked files are a problem. Agents often create mess that I don't see.
+I'll find a better solution, but for now: Please announce any of those that you make (coarse-grained is fine).
+
 ### Plan step pacing
 
-The user often evaluates between plan steps before proceeding — don't assume steps run back-to-back.
+Once a plan step is "code complete", we are in the "the user is reviewing and/or manual testing" stage. 
+Until I approve the step (which can be a simple "lgtm", or I run "/wrap"), don't run /wrap or /wrap-pl.
+
+I may do any of the following
+- report a bug (expecting an investigation, and an immediate fix if it's small, a report-back otherwise)
+- make changes
+- ask for changes (including refactoring, or even additional features in the same step)
+- ask for a plan addition
+
+Before starting "additional" work connected to a plan (but not yet written as a step) - e.g. a change I asked for,
+or a bug fix, first write at least a one-line description into the appropriate step in the plan. `/wrap` and
+`/plan-refine-next-step` act only on the plan file's content — unrecorded work is invisible to them
+and gets silently dropped when a wrap reverts the pointer to the previously-written step.
+
+### Initiative
+
+Don't propose next steps or ask "ready to proceed to X?" unless I've signaled readiness or
+there's actual time pressure. The end-of-turn summary describes what changed; I'll
+decide the next step.
+
+For commit-prep specifically: don't ask "ready to commit?" or start staging / running git
+status, diff, log, or invoking the git skill without explicit instruction. "Tests pass" is
+not a signal to commit.
+
+Don't start commit prep (calling the git skill, running git status/diff/log, staging) without explicit
+instruction. "Tests pass" is not a signal to commit — the user signals readiness.
+
+### Wrap sequence
+
+When the user invokes `/wrap`, IF all open questions (open questions (including the `/reflect` conversation) are
+resolved, invoke `/wrap-pl` yourself as the final step. Don't invoke it in the same turn as an open question.
 
 ### Working-coordination plan docs are throwaway
 
@@ -73,19 +117,6 @@ data freshness, not a decision reversal.
 How to apply: when editing a decision section after a label change, fully replace the prose.
 Preserve evidence that grounds the current rationale; drop the "we used to think / then switched"
 framing.
-
-### Pacing and initiative
-
-Don't propose next steps or ask "ready to proceed to X?" unless I've signaled readiness or
-there's actual time pressure. The end-of-turn summary describes what changed; I'll
-decide the next step.
-
-For commit-prep specifically: don't ask "ready to commit?" or start staging / running git
-status, diff, log, or invoking the git skill without explicit instruction. "Tests pass" is
-not a signal to commit.
-
-Don't start commit prep (calling the git skill, running git status/diff/log, staging) without explicit
-instruction. "Tests pass" is not a signal to commit — the user signals readiness.
 
 ### Reading repo source — don't trust a stale clone
 
