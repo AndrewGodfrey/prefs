@@ -118,6 +118,14 @@ tightening. If a finding needs verification, propose the verification, not the a
 on the finding being true. Treat attribution ("who should fix this") as a downstream action —
 don't do it speculatively.
 
+### Open design questions on my own systems
+
+When a design decision has an open solution space (not a simple preference toggle) on a system I
+built myself, state the analysis/tradeoffs and ask an open question rather than forcing it into
+AskUserQuestion's 2-4 presets — I often have unstated intentions for my own designs that presets
+won't include. Simple scoping/sequencing choices (implement now vs. later, pick between two clearly
+exhaustive options) are still fine as AskUserQuestion.
+
 ## Public repos
 
 Before finalizing a feature branch or committing directly to main, run `/check-prat-layers`.
