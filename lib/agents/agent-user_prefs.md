@@ -54,6 +54,10 @@ The "staged" area is mine - don't stage or unstage changes yourself. One excepti
 I appreciate it when you put pure file-moves there, to separate those from changes to the file. I try to preserve
 that in the commit history, when it's not a lot of extra work for me.
 
+This holds even when you only want to *look at* a diff, not commit. Wanting a unified view across staged and
+unstaged changes doesn't justify `git add -A` — run `git diff` (unstaged) and `git diff --cached` (staged)
+separately instead. "I'm just viewing, not committing" is not an exception to this rule.
+
 On the other hand: You are free to create or edit any file that isn't .gitignored, in any repository
 I am monitoring. (That's typically prat, prefs, de, and whichever repo we're working on if that's separate).
 I will see those.
