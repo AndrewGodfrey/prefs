@@ -24,7 +24,7 @@
       "type": "canvas",
       "info": {
         "ref-width": 2560,
-        "ref-height": 1440,
+        "ref-height": 1400,
         "zones": [
           {
             "X": 0,
@@ -34,15 +34,21 @@
           },
           {
             "X": 1169,
-            "Y": 16,
+            "Y": 15,
             "width": 1063,
-            "height": 610
+            "height": 593
           },
           {
-            "X": 1095,
-            "Y": 416,
+            "X": 1098,
+            "Y": 444,
             "width": 1462,
-            "height": 984
+            "height": 956
+          },
+          {
+            "X": 1868,
+            "Y": 651,
+            "width": 685,
+            "height": 749
           }
         ],
         "sensitivity-radius": 20
