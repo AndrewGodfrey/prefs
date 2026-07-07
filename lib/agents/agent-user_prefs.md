@@ -177,6 +177,9 @@ Before finalizing a feature branch or committing directly to main, run `/check-p
     for readability (like this).
   - On wide tables, prepend them with `<!-- prettier-ignore -->`. Stops prettier from reflowing
     them into less-readable shapes.
+  - To check width, run `Find-LongMarkdownLines [-Path <file|dir>]` (prat tooling). It reports
+    `path:line: N chars` for lines over the limit and skips fenced code blocks and table rows
+    (which can't be wrapped), so it flags only genuinely wrappable violations. Don't eyeball it.
 - All other text files (code, configs, prose): default ceiling of 240 characters per line.
   Defer to a lower limit if the repo or filetype has one. **Apply only to lines you're
   changing** — don't reformat untouched lines just because they exceed the limit.
