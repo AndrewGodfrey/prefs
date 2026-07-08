@@ -113,19 +113,27 @@ it as a permanent artifact. The corresponding `_done.md` may be kept for referen
 If a plan is intended for an audience beyond us (review, sharing, publication), it's a deliverable
 — treat it accordingly. If which flavor isn't clear from context, ask.
 
-### Spec / planning docs: don't narrate decision reversals
+### Don't narrate decision reversals — in docs or code comments
 
-When a decision flips in a spec / planning doc (e.g. `add` → `convert`), fully rewrite the
-prose to read as the current plan. Drop framings like "originally framed as X, switched to Y",
-"the first pass thought Z", "research note: switched after sweep". Git captures the prior state;
-the doc itself should not. Recurring correction.
+When a decision flips in a spec/planning doc (e.g. `add` → `convert`), or when a comment goes in
+right after fixing your own design mistake, don't narrate the correction. Drop framings like
+"originally framed as X, switched to Y", "the first pass thought Z", "research note: switched
+after sweep", "session-scoped, not per-turn", "before dispatch — not after, as originally
+planned". Git captures the prior state; the doc/comment itself should not. Recurring correction —
+caught first in planning docs, then again in a code comment explaining a just-fixed bug.
+
+Test: a fresh reader never saw the wrong version, so contrasting the current design against it is
+noise, not signal — even when the underlying fix was substantive and worth explaining. Keep only
+what states a genuinely non-obvious fact about the *current* design, phrased affirmatively, with
+no reference to what it used to be or what an earlier pass assumed.
 
 Dates of evidence-gathering are OK ("as of 2026-05-28, no internal readers exist") — those mark
 data freshness, not a decision reversal.
 
-How to apply: when editing a decision section after a label change, fully replace the prose.
-Preserve evidence that grounds the current rationale; drop the "we used to think / then switched"
-framing.
+How to apply: when editing a decision section after a label change, fully replace the prose;
+preserve evidence that grounds the current rationale, drop the "we used to think / then switched"
+framing. In code, before adding a comment right after fixing your own mistake, ask whether it
+explains the design or narrates the correction — cut it if the latter.
 
 ### Reading repo source — don't trust a stale clone
 
