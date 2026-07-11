@@ -18,6 +18,6 @@ Closes a fully completed plan. The plan file is deleted; only the `*_done.md` fi
    `planFile` matches the active plan and remove it from the array. Write back the remaining
    entries as valid JSON. If no matching entry exists, say so and continue.
 
-4. **Delete the plan file.** Confirm the `*_done.md` file exists alongside it first.
+4. **Delete the plan file.** First confirm the `*_done.md` file exists alongside it. (Under `plans/done/YYYY-Qn/`)
 
 5. Tell the user to run `/exit`.
