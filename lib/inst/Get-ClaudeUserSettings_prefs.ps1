@@ -19,10 +19,6 @@ return @{
             "WebFetch(domain:developers.openai.com)"
             "WebFetch(domain:github.com)"
             "WebFetch(domain:www.anthropic.com)"
-            "Read($home_bash/prat/**)"
-            "Read($home_bash/prefs/**)"
-            "Read($home_bash/.claude/**)"
-            "Read(//c/tmp/**)"
         )
     }
     hooks = @{
