@@ -17,6 +17,11 @@ carriers, not by raw code-search hits" → "Driven by carriers"); the trailing "
 filler restating X's opposite. Keep it only when "not Y" distinguishes two specific states the
 reader might conflate — "inferred, not verified" is fine if the emphasis is important.
 
+When flagging an open or blocking item in a status update (e.g. "still an open [USER] decision"),
+restate the actual substance of the question, not just a compressed label plus a role tag. A
+`[USER]`/`[AGENT]` tag in a plan is a plan-authoring convention marking who does a step — it's not
+a substitute for content in a conversational summary.
+
 ## Workflow preferences
 
 ### Saving to memory
@@ -70,6 +75,11 @@ I'll find a better solution, but for now: Please announce any of those that you 
 Once a plan step is "code complete", we are in the "the user is reviewing and/or manual testing" stage. 
 Until I approve the step (which can be a simple "lgtm", or I run "/wrap"), don't run /wrap or /wrap-pl.
 
+Before /wrap, expect a user-directed pass that isn't written in the plan itself. It typically includes at
+least one of, often several: user review; manual testing; cleanup/refactoring (including pre-existing
+issues that only become apparent during this pass, not just new-code issues); increasing test coverage
+(including pre-existing gaps, not just gaps in new code).
+
 I may do any of the following
 - report a bug (expecting an investigation, and an immediate fix if it's small, a report-back otherwise)
 - make changes
@@ -80,6 +90,10 @@ Before starting "additional" work connected to a plan (but not yet written as a 
 or a bug fix, first write at least a one-line description into the appropriate step in the plan. `/wrap` and
 `/plan-refine-next-step` act only on the plan file's content — unrecorded work is invisible to them
 and gets silently dropped when a wrap reverts the pointer to the previously-written step.
+
+A single plan step commonly spans multiple separate commits (I stage and commit incrementally as pieces
+land, per "We work in parallel" above) — don't equate "one plan step" with "one commit," and don't infer
+from commit-sized chunking that a step is done; only I or an explicit /wrap signal that.
 
 ### Initiative
 
@@ -188,6 +202,8 @@ Before finalizing a feature branch or committing directly to main, run `/check-p
   - To check width, run `Find-LongMarkdownLines [-Path <file|dir>]` (prat tooling). It reports
     `path:line: N chars` for lines over the limit and skips fenced code blocks and table rows
     (which can't be wrapped), so it flags only genuinely wrappable violations. Don't eyeball it.
+  - Headings can't be wrapped either (each `#`-prefixed line becomes its own separate heading) —
+    shorten an overlong heading instead of splitting it across lines.
 - All other text files (code, configs, prose): default ceiling of 240 characters per line.
   Defer to a lower limit if the repo or filetype has one. **Apply only to lines you're
   changing** — don't reformat untouched lines just because they exceed the limit.
