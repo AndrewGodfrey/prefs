@@ -45,6 +45,11 @@ Don't argue that the change isn't needed, isn't justified yet, or should wait. I
 
 Prefer short sessions with plan-file continuity over long sessions that rely on compaction.
 
+Why (cloud models; local models change this): cached re-reads are ~1/10 price but recur on every
+request, so over a session they grow O(n²) with turn count while new tokens grow O(n). Past a
+crossover the cached re-reads dominate — a single added turn at the end of a long session can cost
+more than the same work done uncached in a fresh session.
+
 ### We work in parallel
 The following is my typical workflow. Sometimes I might instead ask you to commit a series of changes to a branch, but
 I'll clearly ask for that when it's relevant. Usually it's not, and instead:
@@ -94,6 +99,16 @@ and gets silently dropped when a wrap reverts the pointer to the previously-writ
 A single plan step commonly spans multiple separate commits (I stage and commit incrementally as pieces
 land, per "We work in parallel" above) — don't equate "one plan step" with "one commit," and don't infer
 from commit-sized chunking that a step is done; only I or an explicit /wrap signal that.
+
+### Interruptions and sync points
+
+Model 1 interruption as ~30 minutes of my work — humans don't context-switch well. Any turn I must
+wait more than ~5 seconds for counts as an interruption. Weigh token costs against human time on
+this scale; both are precious.
+
+The goal is few, high-value sync points rather than zero interruptions: some turns are worth far
+more than they cost (e.g. my turn after /reflect, which surfaces good and bad ideas from both agent
+and user). Batch low-value asks into the valuable sync points instead of adding turns.
 
 ### Initiative
 
