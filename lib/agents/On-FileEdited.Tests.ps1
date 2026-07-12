@@ -4,6 +4,7 @@ BeforeDiscovery {
 
 BeforeAll {
     . "$PSScriptRoot/On-FileEdited.ps1"
+    $script:hookScriptPath = "$PSScriptRoot/On-FileEdited.ps1"
 
     function hookDataFor($path) {
         @{ tool_name = 'Edit'; tool_input = @{ file_path = $path } }
@@ -199,5 +200,31 @@ Describe 'Repair-FileLineEndings' -Tag Integration {
         Repair-FileLineEndings $file
 
         [System.IO.File]::ReadAllBytes($file) | Should -Be @(104, 105, 0, 10)
+    }
+}
+
+Describe 'Hook invocation exit code' -Tag Integration {
+    BeforeEach {
+        $script:testRoot = Join-Path (Resolve-Path "TestDrive:\").ProviderPath "On-FileEdited.Hook.Tests"
+        $script:gitDir   = "$testRoot\git"
+        mkdir $gitDir | Out-Null
+        git init $gitDir 2>$null | Out-Null
+        git -C $gitDir config core.autocrlf true 2>$null | Out-Null
+        # core.safecrlf deliberately left unset: its `git config` lookup exits 1, and the hook
+        # must not leak that as its own exit code (CC shows any non-0/non-2 exit as a hook error).
+    }
+    AfterEach {
+        Remove-Item $testRoot -Recurse -Force
+    }
+
+    It "exits 0 through the registered wrapper when there is no feedback" {
+        $file = "$gitDir\db.json"
+        writeLf $file
+
+        # Mirror the registered command form from Get-ClaudeUserSettings_prefs.ps1
+        $hookJson = '{"tool_input":{"file_path":"' + ($file -replace '\\', '/') + '"}}'
+        $hookJson | pwsh -NoProfile -Command "& '$hookScriptPath'; exit `$LASTEXITCODE" | Out-Null
+
+        $LASTEXITCODE | Should -Be 0
     }
 }

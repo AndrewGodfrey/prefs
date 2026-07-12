@@ -93,4 +93,7 @@ if ($MyInvocation.InvocationName -ne '.') {
         [Console]::Error.WriteLine($feedback)
         exit 2
     }
+    # Explicit success exit: without it, $LASTEXITCODE from the last git call (e.g. `git config`
+    # on an unset key exits 1) leaks through the registered wrapper's `exit $LASTEXITCODE`.
+    exit 0
 }
