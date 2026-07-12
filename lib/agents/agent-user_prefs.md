@@ -34,7 +34,8 @@ scoping memory too narrowly.
 
 ### Toil
 
-When a tool or scanner produces known false positives, suppress them in code — don't accept repeated manual review as a substitute.
+When a tool or scanner produces known false positives, suppress them in code — don't accept repeated
+manual review as a substitute.
 
 ### Exploratory work
 
@@ -72,8 +73,9 @@ On the other hand: You are free to create or edit any file that isn't .gitignore
 I am monitoring. (That's typically prat, prefs, de, and whichever repo we're working on if that's separate).
 I will see those.
 
-Then again: Un-git-tracked files are a problem. Agents often create mess that I don't see.
-I'll find a better solution, but for now: Please announce any of those that you make (coarse-grained is fine).
+Then again: files agents create under gitignored directories are a problem — fork.dev doesn't surface
+those (unlike untracked files, which it shows clearly), so messes there can go unnoticed for a long
+time. I'll find a better solution, but for now: please announce any you create (coarse-grained is fine).
 
 ### Plan step pacing
 
