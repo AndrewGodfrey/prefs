@@ -21,11 +21,14 @@ return @{
             "WebFetch(domain:www.anthropic.com)"
         )
     }
+    # On-FileEdited fixes line endings and feeds markdown width findings back to the agent.
+    # It lives here rather than in prat so the base layer doesn't impose the policy; the trailing
+    # `exit $LASTEXITCODE` propagates exit 2, the only code CC feeds stderr back to the agent on.
     hooks = @{
         PostToolUse = @(
             @{
                 matcher = "Edit|Write"
-                hooks   = @(@{type = "command"; command = 'pwsh -c ''& "$home/prat/lib/On-PostToolUse.ps1"'''})
+                hooks   = @(@{type = "command"; command = 'pwsh -c ''& "$home/prefs/lib/agents/On-FileEdited.ps1"; exit $LASTEXITCODE'''})
             }
         )
     }
