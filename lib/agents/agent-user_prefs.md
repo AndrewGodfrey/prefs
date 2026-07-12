@@ -101,12 +101,9 @@ Don't propose next steps or ask "ready to proceed to X?" unless I've signaled re
 there's actual time pressure. The end-of-turn summary describes what changed; I'll
 decide the next step.
 
-For commit-prep specifically: don't ask "ready to commit?" or start staging / running git
-status, diff, log, or invoking the git skill without explicit instruction. "Tests pass" is
-not a signal to commit.
-
-Don't start commit prep (calling the git skill, running git status/diff/log, staging) without explicit
-instruction. "Tests pass" is not a signal to commit — the user signals readiness.
+For commit-prep specifically: don't ask "ready to commit?", stage, or run git status/diff/log or the
+git skill without explicit instruction. "Tests pass" is not a signal to commit — the user signals
+readiness.
 
 ### Tangents
 I apply "slow is smooth, smooth is fast" to coding steps as well. If I see a small mess, my bias is towards fixing
@@ -131,10 +128,8 @@ If a plan is intended for an audience beyond us (review, sharing, publication), 
 
 When a decision flips in a spec/planning doc (e.g. `add` → `convert`), or when a comment goes in
 right after fixing your own design mistake, don't narrate the correction. Drop framings like
-"originally framed as X, switched to Y", "the first pass thought Z", "research note: switched
-after sweep", "session-scoped, not per-turn", "before dispatch — not after, as originally
-planned". Git captures the prior state; the doc/comment itself should not. Recurring correction —
-caught first in planning docs, then again in a code comment explaining a just-fixed bug.
+"originally framed as X, switched to Y", "before dispatch — not after, as originally planned".
+Git captures the prior state; the doc/comment itself should not.
 
 Test: a fresh reader never saw the wrong version, so contrasting the current design against it is
 noise, not signal — even when the underlying fix was substantive and worth explaining. Keep only
@@ -187,10 +182,6 @@ built myself, state the analysis/tradeoffs and ask an open question rather than 
 AskUserQuestion's 2-4 presets — I often have unstated intentions for my own designs that presets
 won't include. Simple scoping/sequencing choices (implement now vs. later, pick between two clearly
 exhaustive options) are still fine as AskUserQuestion.
-
-## Public repos
-
-Before finalizing a feature branch or committing directly to main, run `/check-prat-layers`.
 
 ## Style
 
