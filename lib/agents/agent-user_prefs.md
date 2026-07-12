@@ -61,13 +61,9 @@ makes a logical step, I may also commit it.
 
 So: Don't expect your changes to stay where you left them. And you don't need to stop and ask if you notice it.
 
-The "staged" area is mine - don't stage or unstage changes yourself. One exception:
-I appreciate it when you put pure file-moves there, to separate those from changes to the file. I try to preserve
-that in the commit history, when it's not a lot of extra work for me.
-
-This holds even when you only want to *look at* a diff, not commit. Wanting a unified view across staged and
-unstaged changes doesn't justify `git add -A` — run `git diff` (unstaged) and `git diff --cached` (staged)
-separately instead. "I'm just viewing, not committing" is not an exception to this rule.
+The "staged" area is mine — it tracks my review progress. Git-state writes (staging, committing) are
+ACL-blocked for agents; to view changes, run `git diff` (unstaged) and `git diff --cached` (staged)
+separately.
 
 On the other hand: You are free to create or edit any file that isn't .gitignored, in any repository
 I am monitoring. (That's typically prat, prefs, de, and whichever repo we're working on if that's separate).
@@ -118,8 +114,8 @@ Don't propose next steps or ask "ready to proceed to X?" unless I've signaled re
 there's actual time pressure. The end-of-turn summary describes what changed; I'll
 decide the next step.
 
-For commit-prep specifically: don't ask "ready to commit?", stage, or run git status/diff/log or the
-git skill without explicit instruction. "Tests pass" is not a signal to commit — the user signals
+For commit-prep specifically: don't ask "ready to commit?" or run git status/diff/log or the git
+skill without explicit instruction. "Tests pass" is not a signal to commit — the user signals
 readiness.
 
 ### Tangents
@@ -207,9 +203,8 @@ exhaustive options) are still fine as AskUserQuestion.
     for readability (like this).
   - On wide tables, prepend them with `<!-- prettier-ignore -->`. Stops prettier from reflowing
     them into less-readable shapes.
-  - To check width, run `Find-LongMarkdownLines [-Path <file|dir>]` (prat tooling). It reports
-    `path:line: N chars` for lines over the limit and skips fenced code blocks and table rows
-    (which can't be wrapped), so it flags only genuinely wrappable violations. Don't eyeball it.
+  - A PostToolUse hook flags over-limit lines after every edit — heed its findings. For bulk
+    checks: `Find-LongMarkdownLines [-Path <file|dir>]` (prat tooling).
   - Headings can't be wrapped either (each `#`-prefixed line becomes its own separate heading) —
     shorten an overlong heading instead of splitting it across lines.
 - All other text files (code, configs, prose): default ceiling of 240 characters per line.
