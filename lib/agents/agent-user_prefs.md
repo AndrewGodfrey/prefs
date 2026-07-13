@@ -73,31 +73,6 @@ Then again: files agents create under gitignored directories are a problem — f
 those (unlike untracked files, which it shows clearly), so messes there can go unnoticed for a long
 time. I'll find a better solution, but for now: please announce any you create (coarse-grained is fine).
 
-### Plan step pacing
-
-Once a plan step is "code complete", we are in the "the user is reviewing and/or manual testing" stage. 
-Until I approve the step (which can be a simple "lgtm", or I run "/wrap"), don't run /wrap or /wrap-pl.
-
-Before /wrap, expect a user-directed pass that isn't written in the plan itself. It typically includes at
-least one of, often several: user review; manual testing; cleanup/refactoring (including pre-existing
-issues that only become apparent during this pass, not just new-code issues); increasing test coverage
-(including pre-existing gaps, not just gaps in new code).
-
-I may do any of the following
-- report a bug (expecting an investigation, and an immediate fix if it's small, a report-back otherwise)
-- make changes
-- ask for changes (including refactoring, or even additional features in the same step)
-- ask for a plan addition
-
-Before starting "additional" work connected to a plan (but not yet written as a step) - e.g. a change I asked for,
-or a bug fix, first write at least a one-line description into the appropriate step in the plan. `/wrap` and
-`/plan-refine-next-step` act only on the plan file's content — unrecorded work is invisible to them
-and gets silently dropped when a wrap reverts the pointer to the previously-written step.
-
-A single plan step commonly spans multiple separate commits (I stage and commit incrementally as pieces
-land, per "We work in parallel" above) — don't equate "one plan step" with "one commit," and don't infer
-from commit-sized chunking that a step is done; only I or an explicit /wrap signal that.
-
 ### Interruptions and sync points
 
 Model 1 interruption as ~30 minutes of my work — humans don't context-switch well. Any turn I must
@@ -122,11 +97,6 @@ readiness.
 I apply "slow is smooth, smooth is fast" to coding steps as well. If I see a small mess, my bias is towards fixing
 it immediately, rather than let it grow into a big one. This means one planned step may often end up with multiple other
 changes attached. That's intentional.
-
-### Wrap sequence
-
-When the user invokes `/wrap`, IF all open questions (open questions (including the `/reflect` conversation) are
-resolved, invoke `/wrap-pl` yourself as the final step. Don't invoke it in the same turn as an open question.
 
 ### Working-coordination plan docs are throwaway
 
