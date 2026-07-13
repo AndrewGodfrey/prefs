@@ -752,6 +752,17 @@ Describe "getPlanTitle" {
         Set-Content "TestDrive:\title4.md" @("## Sub", "# Real Title")
         getPlanTitle (Get-Item "TestDrive:\title4.md").FullName | Should -Be 'Real Title'
     }
+
+    It "skips a frontmatter block and finds the heading after it" {
+        Set-Content "TestDrive:\title5.md" @("---", "state: ready-to-plan", "---", "# Real Title")
+        getPlanTitle (Get-Item "TestDrive:\title5.md").FullName | Should -Be 'Real Title'
+    }
+
+    It "finds the heading even when a long frontmatter block pushes it past line 10" {
+        $fm = @('---') + (1..10 | ForEach-Object { "refined-entry-${_}: true" }) + @('---', '# Late Real Title')
+        Set-Content "TestDrive:\title6.md" $fm
+        getPlanTitle (Get-Item "TestDrive:\title6.md").FullName | Should -Be 'Late Real Title'
+    }
 }
 
 Describe "writeLaunchIntent" {

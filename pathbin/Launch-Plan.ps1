@@ -621,7 +621,18 @@ function checkSyncPath($path) {
 # --- Helpers ---
 
 function getPlanTitle([string] $path) {
-    $heading = Get-Content $path -TotalCount 10 | Where-Object { $_ -match '^# ' } | Select-Object -First 1
+    $lines = @(Get-Content $path -TotalCount 40)
+    $start = 0
+    if ($lines.Count -gt 0 -and $lines[0] -eq '---') {
+        $close = -1
+        for ($i = 1; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -eq '---') { $close = $i; break }
+        }
+        if ($close -ge 0) { $start = $close + 1 }
+    }
+    if ($start -ge $lines.Count) { return '' }
+
+    $heading = $lines[$start..($lines.Count - 1)] | Where-Object { $_ -match '^# ' } | Select-Object -First 1
     if ($heading) { return $heading -replace '^# ', '' }
     return ''
 }
