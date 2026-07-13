@@ -2,6 +2,6 @@
 @{
     skillGroups = @{
         writing       = @('kql-techniques')
-        planLifecycle = @('end-plan', 'wrap-pl')
+        planLifecycle = @('end-plan')
     }
 }
