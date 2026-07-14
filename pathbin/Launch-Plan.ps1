@@ -31,7 +31,7 @@ function buildLauncherContext {
     $resolved = resolveSessionIds $db $runningDir $livePids
     saveDb $db $dbPath
     cleanStaleRunningFiles $runningDir $livePids
-    attachPlanStates $db
+    attachEntryInfo $db
 
     $notices = [System.Collections.Generic.List[string]]::new()
     foreach ($n in $resolved.notices) { $notices.Add($n) }
@@ -58,12 +58,17 @@ function loadLauncherDb([string] $path) {
     return ,$db
 }
 
-# Lifecycle state is read fresh from each plan's frontmatter; it lives on the in-memory entry
-# only for display (saveDb strips it).
-function attachPlanStates($db) {
-    foreach ($entry in $db) {
-        $entry | Add-Member -NotePropertyName state -NotePropertyValue (Get-PlanState -PlanFile $entry.planFile).State -Force
-    }
+# Display-only fields on the in-memory entries (saveDb strips them): the frontmatter state, and
+# what Enter will do (enterKind 'resume'|'fresh').
+function attachEntryInfo($db) {
+    foreach ($entry in $db) { updateEntryInfo $entry }
+}
+
+function updateEntryInfo($entry) {
+    $state     = (Get-PlanState -PlanFile $entry.planFile).State
+    $resumable = @(getSessionInfos $entry.sessionIds).Count -gt 0
+    $entry | Add-Member -NotePropertyName state -NotePropertyValue $state -Force
+    $entry | Add-Member -NotePropertyName enterKind -NotePropertyValue (getLaunchAction $state $resumable $entry.planFile).kind -Force
 }
 
 # --- TUI ---
@@ -146,8 +151,10 @@ function renderList($db, $selected, $liveSessionIds, $orphans, $crossFlags, $not
         $live     = isLive $entry $liveSessionIds
         $isCross  = $crossFlags -contains $entry.planFile
         $prefix   = if ($i -eq $selected) { '→ ' } else { '  ' }
-        $status   = if ($live) { '[live]   ' } else { '[dormant]' }
-        $statusFg = if ($live) { 'Green' } else { 'DarkGray' }
+        # Marker = what Enter does: switch to the live session is impossible ([live]), open the
+        # session picker ([resume]), or start a fresh session ([fresh]).
+        $status   = if ($live) { '[live]  ' } elseif ($entry.enterKind -eq 'resume') { '[resume]' } else { '[fresh] ' }
+        $statusFg = if ($live) { 'Green' } elseif ($entry.enterKind -eq 'resume') { 'Cyan' } else { 'DarkGray' }
         $nameFg   = if ($i -eq $selected) { 'White' } else { 'Gray' }
         $planName = Split-Path $entry.planFile -Leaf
 
@@ -195,25 +202,26 @@ function changeState($db, $entry) {
     }
     if ($newState -and $newState -ne $entry.state) {
         $null = Set-PlanState -PlanFile $entry.planFile -State $newState
-        $entry | Add-Member -NotePropertyName state -NotePropertyValue $newState -Force
+        updateEntryInfo $entry
     }
 }
 
 # Pure dispatch for opening a plan: lifecycle state + session availability → what to do.
-# kind 'fresh' launches a new session with .prompt (after applying .setState, if any);
-# kind 'resume' resumes an existing session. Missing/unknown state is treated as ready-to-plan.
+# kind 'fresh' launches a new session; kind 'resume' opens the session picker. .prompt always
+# carries the state's fresh-launch prompt — the picker offers it as its start-fresh row.
+# Missing/unknown state is treated as ready-to-plan.
 function getLaunchAction([string] $state, [bool] $hasResumableSessions, [string] $planFile) {
     if ($state -eq 'checkpointed') {
         # Consume the checkpoint: old sessions are reference-only, launch a fresh implement session.
         return @{ kind = 'fresh'; prompt = "Please do the next step in $planFile"; setState = 'ready-to-implement' }
     }
-    if ($hasResumableSessions) { return @{ kind = 'resume'; prompt = $null; setState = $null } }
     $prompt = switch ($state) {
         'ready-to-implement' { "Please do the next step in $planFile" }
         'code-complete'      { "$planFile is code-complete — please load context to review the current step." }
         default              { "Please plan the next step in $planFile" }
     }
-    return @{ kind = 'fresh'; prompt = $prompt; setState = $null }
+    $kind = if ($hasResumableSessions) { 'resume' } else { 'fresh' }
+    return @{ kind = $kind; prompt = $prompt; setState = $null }
 }
 
 function openProject($db, $entry, $liveSessionIds) {
@@ -229,23 +237,32 @@ function openProject($db, $entry, $liveSessionIds) {
     if ($action.setState) { $null = Set-PlanState -PlanFile $entry.planFile -State $action.setState }
 
     if ($action.kind -eq 'resume') {
-        $picked = if ($infos.Count -eq 1) { $infos[0] } else {
-            $shown = @($infos | Select-Object -First 3)   # older sessions stay in the db, unshown
-            $idx = pickFromList $shown { param($i) "$($i.lastActive.ToString('yyyy-MM-dd HH:mm'))  $($i.summary)" } 'Resume session'
-            if ($null -ne $idx) { $shown[$idx] } else { $null }
+        $rows = @($infos | Select-Object -First 3 | ForEach-Object { @{ kind = 'session'; info = $_ } })   # older sessions stay in the db, unshown
+        $rows += @{ kind = 'fresh' }
+        # Post-wrap planning usually wants a fresh session; mid-work states default to resuming.
+        $initial = if ($state -eq 'ready-to-plan') { $rows.Count - 1 } else { 0 }
+        $idx = pickFromList $rows {
+            param($r)
+            if ($r.kind -eq 'fresh') { '(start fresh session)' }
+            else { "$($r.info.lastActive.ToString('yyyy-MM-dd HH:mm'))  $($r.info.summary)" }
+        } 'Open plan' $initial
+        if ($null -eq $idx) { return $false }
+
+        if ($rows[$idx].kind -eq 'session') {
+            $picked = $rows[$idx].info
+            $script:launchPrewriteSid = $picked.sid
+            $script:launchPrewriteCwd = normalizePath $entry.cwd
+            $exitCode = launchCl $entry.cwd $entry.planFile --resume $picked.sid
+            if ($exitCode -ne 0) {
+                $entry.sessionIds = @($entry.sessionIds | Where-Object { $_ -ne $picked.sid })
+                saveDb $db $dbPath
+                clearConsole
+                Write-Host "Resume failed (cl exit $exitCode) — session $($picked.sid) dropped from this plan." -ForegroundColor Yellow
+                $null = Read-Host 'Press Enter to return'
+            }
+            return $true
         }
-        if ($null -eq $picked) { return $false }
-        $script:launchPrewriteSid = $picked.sid
-        $script:launchPrewriteCwd = normalizePath $entry.cwd
-        $exitCode = launchCl $entry.cwd $entry.planFile --resume $picked.sid
-        if ($exitCode -ne 0) {
-            $entry.sessionIds = @($entry.sessionIds | Where-Object { $_ -ne $picked.sid })
-            saveDb $db $dbPath
-            clearConsole
-            Write-Host "Resume failed (cl exit $exitCode) — session $($picked.sid) dropped from this plan." -ForegroundColor Yellow
-            $null = Read-Host 'Press Enter to return'
-        }
-        return $true
+        # fresh row picked — fall through to the fresh launch below
     }
 
     $entry.cwd = normalizePath $PWD.Path
@@ -490,9 +507,9 @@ function registerProject($db, $orphans, $liveSessionIds) {
     saveDb $db $dbPath
 }
 
-function pickFromList($items, $labelFn, $title) {
-    $selected = 0
+function pickFromList($items, $labelFn, $title, [int] $initialSelected = 0) {
     $labels   = @($items | ForEach-Object { & $labelFn $_ })
+    $selected = [Math]::Min([Math]::Max(0, $initialSelected), $labels.Count - 1)
 
     while ($true) {
         [Console]::Clear()

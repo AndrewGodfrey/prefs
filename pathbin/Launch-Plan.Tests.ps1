@@ -120,21 +120,58 @@ Describe "loadLauncherDb" {
     }
 }
 
-Describe "attachPlanStates" {
+Describe "attachEntryInfo" {
+    BeforeAll {
+        $script:attachRoot = ((New-Item -ItemType Directory "TestDrive:\plans-attach").FullName -replace '\\', '/').TrimEnd('/')
+
+        function newAttachPlan([string] $name, [string] $state) {
+            $path = "$script:attachRoot/$name.md"
+            Set-Content $path @("# $name", "", "## Step 1: x")
+            if ($state) { $null = Set-PlanState -PlanFile $path -State $state }
+            return $path
+        }
+    }
+
+    BeforeEach {
+        Mock getSessionInfos { @() }
+    }
+
     It "attaches frontmatter state; a plan without frontmatter gets null" {
-        $plansDir = ((New-Item -ItemType Directory "TestDrive:\plans-attach").FullName -replace '\\', '/').TrimEnd('/')
-        Set-Content "$plansDir/with.md" @('# t', '', '## Step 1: x')
-        Set-Content "$plansDir/without.md" '# t'
-        $null = Set-PlanState -PlanFile "$plansDir/with.md" -State 'code-complete'
         $db = @(
-            [pscustomobject]@{planFile = "$plansDir/with.md"; cwd = "C:/de"; sessionIds = @()}
-            [pscustomobject]@{planFile = "$plansDir/without.md"; cwd = "C:/de"; sessionIds = @()}
+            [pscustomobject]@{planFile = (newAttachPlan 'with' 'code-complete'); cwd = "C:/de"; sessionIds = @()}
+            [pscustomobject]@{planFile = (newAttachPlan 'without' $null); cwd = "C:/de"; sessionIds = @()}
         )
 
-        attachPlanStates $db
+        attachEntryInfo $db
 
         $db[0].state | Should -Be 'code-complete'
         $db[1].state | Should -BeNullOrEmpty
+    }
+
+    It "attaches enterKind resume when resumable sessions exist, fresh when none" {
+        Mock getSessionInfos { param($sessionIds) if (@($sessionIds).Count -gt 0) {
+            @([pscustomobject]@{sid = 'sid-1'; lastActive = Get-Date; summary = 's'})
+        } else { @() } }
+        $db = @(
+            [pscustomobject]@{planFile = (newAttachPlan 'has-session' 'ready-to-implement'); cwd = "C:/de"; sessionIds = @("sid-1")}
+            [pscustomobject]@{planFile = (newAttachPlan 'no-session' 'ready-to-implement'); cwd = "C:/de"; sessionIds = @()}
+        )
+
+        attachEntryInfo $db
+
+        $db[0].enterKind | Should -Be 'resume'
+        $db[1].enterKind | Should -Be 'fresh'
+    }
+
+    It "attaches enterKind fresh for a checkpointed plan even with sessions" {
+        Mock getSessionInfos { @([pscustomobject]@{sid = 'sid-1'; lastActive = Get-Date; summary = 's'}) }
+        $db = @(
+            [pscustomobject]@{planFile = (newAttachPlan 'ckpt' 'checkpointed'); cwd = "C:/de"; sessionIds = @("sid-1")}
+        )
+
+        attachEntryInfo $db
+
+        $db[0].enterKind | Should -Be 'fresh'
     }
 }
 
@@ -613,19 +650,54 @@ Describe "openProject" {
         @($entry.sessionIds)                  | Should -Be @("old-sid")
     }
 
-    It "one resumable session: resumes it directly without a picker" {
+    It "one resumable session: picker offers the session plus a start-fresh row" {
         $plan  = newPlan 'res1' 'ready-to-implement'
         $entry = newEntry $plan @("sid-1")
         $db    = newDb $entry
         Mock getSessionInfos { @(newInfo 'sid-1' (Get-Date)) }
-        Mock pickFromList { throw 'picker should not be shown for a single session' }
+        $script:pickerItems = $null
+        Mock pickFromList { $script:pickerItems = $items; return 0 }
 
         $result = openProject $db $entry @()
 
-        $result               | Should -BeTrue
-        $script:launched.rest | Should -Contain "--resume"
-        $script:launched.rest | Should -Contain "sid-1"
-        @($entry.sessionIds)  | Should -Be @("sid-1")    # not clobbered
+        $result                     | Should -BeTrue
+        @($script:pickerItems)      | Should -HaveCount 2
+        $script:pickerItems[1].kind | Should -Be 'fresh'
+        $script:launched.rest       | Should -Contain "--resume"
+        $script:launched.rest       | Should -Contain "sid-1"
+        @($entry.sessionIds)        | Should -Be @("sid-1")    # not clobbered
+    }
+
+    It "picking the start-fresh row launches fresh with the state's prompt" {
+        $plan  = newPlan 'res-fresh-pick' 'ready-to-implement'
+        $entry = newEntry $plan @("sid-1")
+        $db    = newDb $entry
+        Mock getSessionInfos { @(newInfo 'sid-1' (Get-Date)) }
+        Mock pickFromList { return 1 }    # the fresh row (after 1 session)
+
+        $result = openProject $db $entry @()
+
+        $result                   | Should -BeTrue
+        $script:launched.rest[0]  | Should -Be "Please do the next step in $plan"
+        $script:launched.rest     | Should -Not -Contain "--resume"
+        @($entry.sessionIds)      | Should -Be @("sid-1")    # kept
+    }
+
+    It "default picker selection: start-fresh for ready-to-plan, most recent otherwise" -TestCases @(
+        @{ State = 'ready-to-plan';      ExpectedInitial = 2 }   # after the 2 session rows
+        @{ State = 'ready-to-implement'; ExpectedInitial = 0 }
+    ) {
+        param($State, $ExpectedInitial)
+        $plan  = newPlan "res-default-$State" $State
+        $entry = newEntry $plan @("sid-1", "sid-2")
+        $db    = newDb $entry
+        Mock getSessionInfos { @((newInfo 'sid-1' (Get-Date)), (newInfo 'sid-2' (Get-Date))) }
+        $script:pickerInitial = $null
+        Mock pickFromList { $script:pickerInitial = $initialSelected; return $null }
+
+        $null = openProject $db $entry @()
+
+        $script:pickerInitial | Should -Be $ExpectedInitial
     }
 
     It "resumes for ready-to-plan and code-complete too when sessions exist" -TestCases @(
@@ -637,13 +709,14 @@ Describe "openProject" {
         $entry = newEntry $plan @("sid-1")
         $db    = newDb $entry
         Mock getSessionInfos { @(newInfo 'sid-1' (Get-Date)) }
+        Mock pickFromList { return 0 }
 
         openProject $db $entry @()
 
         $script:launched.rest | Should -Contain "--resume"
     }
 
-    It "multiple sessions: picker shows at most the 3 most recent; picked one is resumed" {
+    It "multiple sessions: picker shows at most the 3 most recent plus start-fresh; picked one is resumed" {
         $plan  = newPlan 'res-multi' 'ready-to-implement'
         $entry = newEntry $plan @("sid-1", "sid-2", "sid-3", "sid-4")
         $db    = newDb $entry
@@ -658,9 +731,10 @@ Describe "openProject" {
 
         openProject $db $entry @()
 
-        @($script:pickerItems).sid | Should -Be @("sid-1", "sid-2", "sid-3")
-        $script:launched.rest      | Should -Contain "sid-2"
-        @($entry.sessionIds)       | Should -HaveCount 4    # not clobbered
+        @($script:pickerItems) | Should -HaveCount 4
+        @($script:pickerItems | Where-Object { $_.kind -eq 'session' }).info.sid | Should -Be @("sid-1", "sid-2", "sid-3")
+        $script:launched.rest  | Should -Contain "sid-2"
+        @($entry.sessionIds)   | Should -HaveCount 4    # not clobbered
     }
 
     It "picker canceled: returns false without launching" {
@@ -691,6 +765,7 @@ Describe "openProject" {
         $entry = newEntry $plan @("sid-1", "sid-2")
         $db    = newDb $entry
         Mock getSessionInfos { @(newInfo 'sid-1' (Get-Date)) }
+        Mock pickFromList { return 0 }
         Mock launchCl { return 1 }
 
         $result = openProject $db $entry @()
@@ -750,6 +825,11 @@ Describe "getLaunchAction" {
     ) {
         param($State)
         (getLaunchAction $State $true 'C:/p/x.md').kind | Should -Be 'resume'
+    }
+
+    It "resume actions still carry the fresh-launch prompt (for the picker's start-fresh row)" {
+        (getLaunchAction 'ready-to-plan' $true 'C:/p/x.md').prompt      | Should -Match 'plan the next step'
+        (getLaunchAction 'ready-to-implement' $true 'C:/p/x.md').prompt | Should -Match 'do the next step'
     }
 
     It "checkpointed: fresh implement launch + state flip, even with sessions" {
