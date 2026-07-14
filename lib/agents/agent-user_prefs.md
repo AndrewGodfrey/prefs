@@ -24,6 +24,13 @@ a substitute for content in a conversational summary.
 
 ## Workflow preferences
 
+### Active plan
+
+`pl` (Launch-Plan) sets `$env:CL_PLAN_FILE` for the sessions it launches, fresh and resumed. When
+a skill or instruction refers to "the active plan", that variable is the default answer; an
+explicit statement from me overrides it. Execution tools that run as a different user (e.g. a
+sandbox over SSH) don't inherit it — pass the plan path explicitly when scripting through one.
+
 ### Saving to memory
 
 Always invoke the `remember` skill when saving anything to memory — corrections, domain knowledge,

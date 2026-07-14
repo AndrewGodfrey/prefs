@@ -1,83 +1,16 @@
 # On-UserPromptSubmit.ps1
-# UserPromptSubmit hook: records (harness process PID → session_id, cwd) for Launch-Plan.ps1.
+# UserPromptSubmit hook: records (harness process PID → session_id, cwd, planFile) for
+# Launch-Plan.ps1. planFile comes from CL_PLAN_FILE, which the pl launcher sets for the whole
+# session (fresh and resumed), so it is re-stamped on every prompt.
 #
 # Output: nothing (no additionalContext emitted).
 
 function main($hookData, [string] $harnessName) {
     define_Proc
     Save-PidSessionRecord $hookData $harnessName
-    Update-CredentialsIfExpiring
 }
 
-# This is to work around a bug in Claude Code, where you get an unnecessary login prompt in a long-running session.
-function Update-CredentialsIfExpiring(
-    [string] $CredsPath     = "$home/.claude/.credentials.json",
-    [string] $TokenEndpoint = 'https://platform.claude.com/v1/oauth/token',
-    [string] $ClientId      = '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
-    [string] $LogPath       = 'C:/tmp/cc_token_refresh.log',
-    [string] $BackoffPath   = 'C:/tmp/cc_token_refresh_backoff.txt',
-    [int]    $BackoffMins   = 5
-) {
-    $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-    $ts    = [DateTimeOffset]::UtcNow.ToString('o')
-
-    if (-not (Test-Path $CredsPath)) {
-        Add-Content $LogPath "$ts  SKIP  no credentials file"
-        return
-    }
-
-    $creds = Get-Content $CredsPath -Raw | ConvertFrom-Json
-    $oauth = $creds.claudeAiOauth
-    if (-not $oauth -or -not $oauth.refreshToken) {
-        Add-Content $LogPath "$ts  SKIP  no refreshToken in credentials"
-        return
-    }
-    if (-not $oauth.expiresAt) {
-        Add-Content $LogPath "$ts  SKIP  no expiresAt in credentials"
-        return
-    }
-
-    $minsRemaining = [math]::Round(([long]$oauth.expiresAt - $nowMs) / 60000, 1)
-    if ([long]$oauth.expiresAt -gt ($nowMs + 10 * 60 * 1000)) {
-        Add-Content $LogPath "$ts  OK    ${minsRemaining}min remaining, no refresh needed"
-        return
-    }
-
-    if (Test-Path $BackoffPath) {
-        $nextAllowedMs = [long](Get-Content $BackoffPath -Raw).Trim()
-        if ($nowMs -lt $nextAllowedMs) {
-            $waitMins = [math]::Round(($nextAllowedMs - $nowMs) / 60000, 1)
-            Add-Content $LogPath "$ts  BACKOFF  ${minsRemaining}min remaining, next attempt in ${waitMins}min"
-            return
-        }
-    }
-
-    Add-Content $LogPath "$ts  REFRESH  ${minsRemaining}min remaining, attempting refresh"
-    $nextAllowed = $nowMs + $BackoffMins * 60 * 1000
-    Set-Content $BackoffPath "$nextAllowed" -Encoding UTF8
-
-    $body = [ordered]@{
-        grant_type    = 'refresh_token'
-        refresh_token = $oauth.refreshToken
-        client_id     = $ClientId
-    } | ConvertTo-Json -Compress
-
-    try {
-        $r = Invoke-RestMethod -Uri $TokenEndpoint -Method Post -ContentType 'application/json' -Body $body
-        $creds.claudeAiOauth.accessToken = $r.access_token
-        $creds.claudeAiOauth.expiresAt   = $nowMs + [long]($r.expires_in * 1000)
-        if ($r.PSObject.Properties['refresh_token'] -and $r.refresh_token) {
-            $creds.claudeAiOauth.refreshToken = $r.refresh_token
-        }
-        $creds | ConvertTo-Json -Depth 10 | Set-Content $CredsPath -Encoding UTF8
-        Remove-Item $BackoffPath -ErrorAction SilentlyContinue
-        Add-Content $LogPath "$ts  REFRESHED  new expiry in $($r.expires_in)s"
-    } catch {
-        Add-Content $LogPath "$ts  ERROR  $_"
-    }
-}
-
-function Save-PidSessionRecord($hookData, [string] $harnessName) {
+function Save-PidSessionRecord($hookData, [string] $harnessName, [string] $runningDir = "$home/prat/auto/context/running") {
     try {
         $sessionId = $hookData.session_id
         $cwd       = $hookData.cwd
@@ -86,29 +19,13 @@ function Save-PidSessionRecord($hookData, [string] $harnessName) {
         $harnessPid = Get-HarnessPid $harnessName
         if (-not $harnessPid) { return }
 
-        $runningDir = "$home/prat/auto/context/running"
-        $intentPath = "$runningDir/launch_intent.json"
-        $planFile   = getIntentPlanFile $cwd $intentPath
-
         $null = New-Item -ItemType Directory -Path $runningDir -Force
         $data = [pscustomobject]@{session_id = $sessionId; cwd = $cwd}
-        if ($planFile) { $data | Add-Member -NotePropertyName 'planFile' -NotePropertyValue $planFile }
+        if ($env:CL_PLAN_FILE) { $data | Add-Member -NotePropertyName 'planFile' -NotePropertyValue $env:CL_PLAN_FILE }
         ConvertTo-Json -InputObject $data -Compress | Set-Content "$runningDir/pid_$harnessPid.txt" -Encoding UTF8
     } catch {
         # Silent — don't end the hook or block the turn, on failure to record the PID/session mapping.
     }
-}
-
-function normalizePath([string] $p) { $p -replace '\\', '/' }
-
-function getIntentPlanFile([string] $cwd, [string] $intentPath) {
-    if (-not (Test-Path $intentPath)) { return $null }
-    try   { $intent = Get-Content $intentPath -Raw | ConvertFrom-Json }
-    catch { return $null }
-    if (-not $intent -or -not $intent.planFile -or -not $intent.cwd) { return $null }
-    if ((normalizePath $intent.cwd) -ne (normalizePath $cwd)) { return $null }
-    Remove-Item $intentPath -Force -ErrorAction SilentlyContinue
-    return $intent.planFile
 }
 
 function Get-HarnessPid([string] $harnessName) {

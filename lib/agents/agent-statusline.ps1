@@ -82,11 +82,16 @@ if ($MyInvocation.InvocationName -ne '.') {
         }
     }
 
+    # Active plan, set by the pl launcher (Launch-Plan.ps1); absent for plain cl sessions.
+    # ASCII marker on purpose: symbol glyphs come from fallback fonts with unpredictable cell
+    # width (observed: U+270E rendered 2 cells), which can trigger repaint artifacts.
+    $planStr = if ($env:CL_PLAN_FILE) { " plan:$([System.IO.Path]::GetFileNameWithoutExtension($env:CL_PLAN_FILE))" } else { '' }
+
     # Set by cl (Start-CommandLineAgent.ps1) at launch; absent for sessions not launched that way.
     $sandboxWarn = if ($env:CL_SANDBOX_MODE -ne '1') { "`e[38;2;255;200;0m*`e[0m " } else { '' }
 
     # Model used for the last turn (Claude Code sends the model active for the response just completed)
     $modelStr = if ($j.model.display_name) { "   ($($j.model.display_name))" } else { '' }
 
-    Write-Host "$sandboxWarn$bar$loc$rlStr$modelStr"
+    Write-Host "$sandboxWarn$bar$loc$planStr$rlStr$modelStr"
 }

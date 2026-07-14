@@ -1,6 +1,8 @@
 # Launch-Plan.ps1  (alias: pl)
 # Interactive launcher for plan-based Claude sessions.
-# Tracks open plans, detects live/dormant Claude processes, and launches or resumes sessions.
+# Plan lifecycle state lives in plan-file frontmatter (Get-PlanState/Set-PlanState); the local db
+# only associates plans with sessions and a cwd. Enter is state-driven; after a session exits, pl
+# returns to its TUI with freshly resolved state.
 #
 # Design: see docs/Launch-Plan.md
 
@@ -9,16 +11,27 @@ param([switch] $NoSyncBackedWarning)
 $dbPath     = "$home/prat/auto/context/db.json"
 $runningDir = "$home/prat/auto/context/running"
 
+. "$home/prat/lib/agents/Set-PlanState.ps1"
+
 function main {
     saveConsoleMode
     Import-Module "$home/prat/lib/PratBase/PratBase.psd1" -ErrorAction SilentlyContinue
 
-    $db = [System.Collections.Generic.List[object]]::new()
-    foreach ($item in (loadDb $dbPath)) { $db.Add($item) }
+    $lastPlan = $null
+    while ($true) {
+        $ctx = buildLauncherContext
+        $lastPlan = runLauncher $ctx.db $ctx.liveSessionIds $ctx.orphans $ctx.crossFlags $ctx.notices $lastPlan
+        if (-not $lastPlan) { return }
+    }
+}
+
+function buildLauncherContext {
+    $db = loadLauncherDb $dbPath
     $livePids = getLiveClaudePids
     $resolved = resolveSessionIds $db $runningDir $livePids
     saveDb $db $dbPath
     cleanStaleRunningFiles $runningDir $livePids
+    attachPlanStates $db
 
     $notices = [System.Collections.Generic.List[string]]::new()
     foreach ($n in $resolved.notices) { $notices.Add($n) }
@@ -34,13 +47,31 @@ function main {
         $crossFlags = getCrossMachineFlags $syncPath
     }
 
-    runLauncher $db $resolved.liveSessionIds $resolved.orphans $crossFlags $notices
+    return @{ db = $db; liveSessionIds = $resolved.liveSessionIds; orphans = $resolved.orphans; crossFlags = $crossFlags; notices = $notices }
+}
+
+function loadLauncherDb([string] $path) {
+    $db = [System.Collections.Generic.List[object]]::new()
+    foreach ($item in (loadDb $path)) {
+        if (Test-Path -LiteralPath $item.planFile) { $db.Add($item) }   # entries for deleted plan files are dropped
+    }
+    return ,$db
+}
+
+# Lifecycle state is read fresh from each plan's frontmatter; it lives on the in-memory entry
+# only for display (saveDb strips it).
+function attachPlanStates($db) {
+    foreach ($entry in $db) {
+        $entry | Add-Member -NotePropertyName state -NotePropertyValue (Get-PlanState -PlanFile $entry.planFile).State -Force
+    }
 }
 
 # --- TUI ---
 
-function runLauncher($db, $liveSessionIds, $orphans, $crossFlags, $notices) {
-    $selected      = 0
+# Returns the launched plan's planFile after a cl launch (the caller rebuilds context and
+# re-enters, restoring the selection), or $null on quit.
+function runLauncher($db, $liveSessionIds, $orphans, $crossFlags, $notices, $initialPlanFile) {
+    $selected      = indexOfPlan $db $initialPlanFile
     $transientError = $null
     while ($true) {
         renderList $db $selected $liveSessionIds $orphans $crossFlags $notices $transientError
@@ -52,12 +83,12 @@ function runLauncher($db, $liveSessionIds, $orphans, $crossFlags, $notices) {
             'Enter' {
                 if ($db.Count -gt 0) {
                     [Console]::Clear()
-                    if (openProject $db $db[$selected] $liveSessionIds) { return }
+                    if (openProject $db $db[$selected] $liveSessionIds) { return $db[$selected].planFile }
                 }
             }
             { $_ -in 'O', 'o' } {
                 [Console]::Clear()
-                if (openUntracked $db) { return }
+                if (openUntracked $db) { return $db[$db.Count - 1].planFile }
             }
             { $_ -in 'R', 'r' } {
                 [Console]::Clear()
@@ -83,9 +114,21 @@ function runLauncher($db, $liveSessionIds, $orphans, $crossFlags, $notices) {
                     }
                 }
             }
-            { $_ -in 'Q', 'q', 'Escape' } { [Console]::Clear(); return }
+            { $_ -in 'Q', 'q', 'Escape' } { [Console]::Clear(); return $null }
         }
     }
+}
+
+function displayState($entry) { if ($entry.state) { $entry.state } else { '-' } }
+
+# TUI selection restore: index of $planFile in the (possibly rebuilt) db; top of list if absent.
+function indexOfPlan($db, [string] $planFile) {
+    if ($planFile) {
+        for ($i = 0; $i -lt $db.Count; $i++) {
+            if ($db[$i].planFile -eq $planFile) { return $i }
+        }
+    }
+    return 0
 }
 
 function renderList($db, $selected, $liveSessionIds, $orphans, $crossFlags, $notices, $transientError) {
@@ -96,7 +139,7 @@ function renderList($db, $selected, $liveSessionIds, $orphans, $crossFlags, $not
     if ($db.Count -eq 0) { Write-Host '  (no open plans — press O to open one)' -ForegroundColor DarkGray }
 
     $maxNameLen  = if ($db.Count -gt 0) { ($db | ForEach-Object { (Split-Path $_.planFile -Leaf).Length } | Measure-Object -Maximum).Maximum } else { 0 }
-    $maxStateLen = if ($db.Count -gt 0) { ($db | ForEach-Object { $_.state.Length } | Measure-Object -Maximum).Maximum } else { 0 }
+    $maxStateLen = if ($db.Count -gt 0) { ($db | ForEach-Object { (displayState $_).Length } | Measure-Object -Maximum).Maximum } else { 0 }
 
     for ($i = 0; $i -lt $db.Count; $i++) {
         $entry    = $db[$i]
@@ -111,7 +154,7 @@ function renderList($db, $selected, $liveSessionIds, $orphans, $crossFlags, $not
         Write-Host -NoNewline $prefix
         Write-Host -NoNewline $status -ForegroundColor $statusFg
         Write-Host -NoNewline "  $($planName.PadRight($maxNameLen))" -ForegroundColor $nameFg
-        Write-Host -NoNewline "  $($entry.state.PadRight($maxStateLen))"
+        Write-Host -NoNewline "  $((displayState $entry).PadRight($maxStateLen))"
         if ($isCross) { Write-Host -NoNewline '  ⚠ other-machine' -ForegroundColor Yellow }
         Write-Host ''
     }
@@ -134,24 +177,43 @@ function renderList($db, $selected, $liveSessionIds, $orphans, $crossFlags, $not
 
 # --- Actions ---
 
+# S is a repair tool: normal state changes happen via the agent's state script during sessions.
 function changeState($db, $entry) {
     clearConsole
     Write-Host "  Change state: $(Split-Path $entry.planFile -Leaf)" -ForegroundColor Cyan
     Write-Host ''
-    Write-Host "  Current state: $($entry.state)"
+    Write-Host "  Current state: $(displayState $entry)"
     Write-Host ''
-    Write-Host '  New state:  [D] Discussing  [I] In-progress  [R] Ready  [Esc] cancel'
+    Write-Host '  New state:  [P] ready-to-plan  [I] ready-to-implement  [C] code-complete  [K] checkpointed  [Esc] cancel'
     $key = readStateKey
     $newState = switch ($key.Key) {
-        'D' { 'discussing' }
-        'I' { 'in-progress' }
-        'R' { 'ready' }
+        'P' { 'ready-to-plan' }
+        'I' { 'ready-to-implement' }
+        'C' { 'code-complete' }
+        'K' { 'checkpointed' }
         default { $null }
     }
     if ($newState -and $newState -ne $entry.state) {
-        $entry.state = $newState
-        saveDb $db $dbPath
+        $null = Set-PlanState -PlanFile $entry.planFile -State $newState
+        $entry | Add-Member -NotePropertyName state -NotePropertyValue $newState -Force
     }
+}
+
+# Pure dispatch for opening a plan: lifecycle state + session availability → what to do.
+# kind 'fresh' launches a new session with .prompt (after applying .setState, if any);
+# kind 'resume' resumes an existing session. Missing/unknown state is treated as ready-to-plan.
+function getLaunchAction([string] $state, [bool] $hasResumableSessions, [string] $planFile) {
+    if ($state -eq 'checkpointed') {
+        # Consume the checkpoint: old sessions are reference-only, launch a fresh implement session.
+        return @{ kind = 'fresh'; prompt = "Please do the next step in $planFile"; setState = 'ready-to-implement' }
+    }
+    if ($hasResumableSessions) { return @{ kind = 'resume'; prompt = $null; setState = $null } }
+    $prompt = switch ($state) {
+        'ready-to-implement' { "Please do the next step in $planFile" }
+        'code-complete'      { "$planFile is code-complete — please load context to review the current step." }
+        default              { "Please plan the next step in $planFile" }
+    }
+    return @{ kind = 'fresh'; prompt = $prompt; setState = $null }
 }
 
 function openProject($db, $entry, $liveSessionIds) {
@@ -160,43 +222,36 @@ function openProject($db, $entry, $liveSessionIds) {
         $null = Read-Host 'Press Enter to return'
         return $false
     }
-    if ($entry.state -eq 'ready') {
-        $entry.state      = 'in-progress'
-        $entry.sessionIds = @()
-        $entry.cwd        = normalizePath $PWD.Path
-        saveDb $db $dbPath
-        writeLaunchIntent $entry.planFile $entry.cwd
-        $exitCode = launchCl $entry.cwd "Please do the next step in $($entry.planFile)"
-        clearLaunchIntent
-        showLaunchError $exitCode
-        if ($exitCode -ne 0) { return $false }
-    } else {
-        $sid = pickSessionId $entry
-        if ($sid) {
-            $entry.sessionIds = @($sid)
-            saveDb $db $dbPath
-            $script:launchPrewriteSid = $sid
-            $script:launchPrewriteCwd = normalizePath $entry.cwd
-            $exitCode = launchCl $entry.cwd --resume $sid
-            if ($exitCode -ne 0) {
-                $entry.sessionIds = @()
-                saveDb $db $dbPath
-                clearConsole
-                Write-Host 'Session not found — session ID cleared. Press Enter again to start fresh.' -ForegroundColor Yellow
-                $null = Read-Host 'Press Enter to return'
-                return $false
-            }
-        } else {
-            $entry.cwd = normalizePath $PWD.Path
-            if ($entry.state -eq 'discussing') { $entry.state = 'in-progress' }
-            saveDb $db $dbPath
-            writeLaunchIntent $entry.planFile $entry.cwd
-            $exitCode = launchCl $entry.cwd "Let's continue work on $($entry.planFile)"
-            clearLaunchIntent
-            showLaunchError $exitCode
-            if ($exitCode -ne 0) { return $false }
+
+    $state  = (Get-PlanState -PlanFile $entry.planFile).State
+    $infos  = @(getSessionInfos $entry.sessionIds)
+    $action = getLaunchAction $state ($infos.Count -gt 0) $entry.planFile
+    if ($action.setState) { $null = Set-PlanState -PlanFile $entry.planFile -State $action.setState }
+
+    if ($action.kind -eq 'resume') {
+        $picked = if ($infos.Count -eq 1) { $infos[0] } else {
+            $shown = @($infos | Select-Object -First 3)   # older sessions stay in the db, unshown
+            $idx = pickFromList $shown { param($i) "$($i.lastActive.ToString('yyyy-MM-dd HH:mm'))  $($i.summary)" } 'Resume session'
+            if ($null -ne $idx) { $shown[$idx] } else { $null }
         }
+        if ($null -eq $picked) { return $false }
+        $script:launchPrewriteSid = $picked.sid
+        $script:launchPrewriteCwd = normalizePath $entry.cwd
+        $exitCode = launchCl $entry.cwd $entry.planFile --resume $picked.sid
+        if ($exitCode -ne 0) {
+            $entry.sessionIds = @($entry.sessionIds | Where-Object { $_ -ne $picked.sid })
+            saveDb $db $dbPath
+            clearConsole
+            Write-Host "Resume failed (cl exit $exitCode) — session $($picked.sid) dropped from this plan." -ForegroundColor Yellow
+            $null = Read-Host 'Press Enter to return'
+        }
+        return $true
     }
+
+    $entry.cwd = normalizePath $PWD.Path
+    saveDb $db $dbPath
+    $exitCode = launchCl $entry.cwd $entry.planFile $action.prompt
+    showLaunchError $exitCode
     return $true
 }
 
@@ -248,7 +303,7 @@ function resetConsoleMode {
 $script:launchPrewriteSid = $null  # set before resume launches to pre-write the running file
 $script:launchPrewriteCwd = $null
 
-function launchCl([string] $cwd) {
+function launchCl([string] $cwd, [string] $planFile) {
     resetConsoleMode
     # Use Start-Process -NoNewWindow so the child process inherits the console directly,
     # bypassing PowerShell's pipeline stdout/stderr capture which breaks interactive TUI apps.
@@ -260,6 +315,9 @@ function launchCl([string] $cwd) {
     $encoded  = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd))
     $spParams = @{ FilePath = 'pwsh'; ArgumentList = @('-NoLogo', '-EncodedCommand', $encoded); NoNewWindow = $true; PassThru = $true }
     if ($cwd) { $spParams.WorkingDirectory = $cwd }
+    # CL_PLAN_FILE rides the process environment into cl — consumed by the UserPromptSubmit hook
+    # (stamps planFile into the running file), the statusline, and skills' active-plan default.
+    $envToken = Set-EnvTemp @{ CL_PLAN_FILE = $planFile }
     try {
         $proc = Start-Process @spParams
         # Pre-write the running file so the session shows live immediately, before the first
@@ -277,6 +335,8 @@ function launchCl([string] $cwd) {
         return $proc.ExitCode
     } catch {
         return 1
+    } finally {
+        Restore-Env $envToken
     }
 }
 
@@ -291,21 +351,41 @@ function showLaunchError([int] $exitCode) {
     }
 }
 
-function pickSessionId($entry) {
-    $ids = @($entry.sessionIds | Where-Object { $_ })
-    if ($ids.Count -eq 0) { return $null }
-    if ($ids.Count -eq 1) { return $ids[0] }
-
-    Write-Host 'Multiple sessions — pick one:'
-    for ($i = 0; $i -lt $ids.Count; $i++) { Write-Host "  [$i] $($ids[$i])" }
-    while ($true) {
-        $choice = Read-Host 'Number'
-        $n = 0
-        if ([int]::TryParse($choice, [ref]$n) -and $n -ge 0 -and $n -lt $ids.Count) {
-            return $ids[$n]
+# Resumable-session lookup: a session is resumable when its jsonl exists under the CC projects
+# root (searching all project dirs avoids reimplementing CC's cwd→dirname rule; the files are
+# sync-backed, so cross-machine sessions count too). Most-recent-first by jsonl mtime.
+function getSessionInfos($sessionIds, [string] $projectsRoot = "$home/.claude/projects") {
+    $infos = @()
+    foreach ($sid in @($sessionIds | Where-Object { $_ })) {
+        $jsonl = @(Get-ChildItem -Path "$projectsRoot/*/$sid.jsonl" -File -ErrorAction SilentlyContinue) | Select-Object -First 1
+        if (-not $jsonl) { continue }
+        $infos += [pscustomobject]@{
+            sid        = $sid
+            lastActive = $jsonl.LastWriteTime
+            summary    = getSessionSummary $jsonl
         }
-        Write-Host "  Enter a number between 0 and $($ids.Count - 1)" -ForegroundColor Red
     }
+    return @($infos | Sort-Object lastActive -Descending)
+}
+
+# Session title for picker display, from CC's sessions-index.json cache (may be missing or
+# stale): summary → firstPrompt (truncated) → the session id.
+function getSessionSummary($jsonlItem) {
+    $indexPath = Join-Path $jsonlItem.DirectoryName 'sessions-index.json'
+    $indexEntry = $null
+    if (Test-Path -LiteralPath $indexPath) {
+        try {
+            $index = Get-Content $indexPath -Raw | ConvertFrom-Json
+            $indexEntry = @($index.entries | Where-Object { $_.sessionId -eq $jsonlItem.BaseName }) | Select-Object -First 1
+        } catch { }
+    }
+    if ($indexEntry -and $indexEntry.summary) { return $indexEntry.summary }
+    if ($indexEntry -and $indexEntry.firstPrompt) {
+        $fp = $indexEntry.firstPrompt
+        if ($fp.Length -gt 60) { return $fp.Substring(0, 57) + '...' }
+        return $fp
+    }
+    return $jsonlItem.BaseName
 }
 
 function getAvailablePlanFiles([string] $plansDir) {
@@ -314,7 +394,7 @@ function getAvailablePlanFiles([string] $plansDir) {
         Where-Object {
             $rel      = (normalizePath $_.FullName).Substring($base.Length + 1)
             $baseName = [System.IO.Path]::GetFileNameWithoutExtension($_.Name)
-            ($rel -notmatch '(^|/)done/') -and ($baseName -notmatch '_done$')
+            ($rel -notmatch '(^|/)done/') -and ($baseName -notmatch '_(done|ref|background)$')
         } |
         Select-Object -ExpandProperty FullName |
         ForEach-Object { normalizePath $_ })
@@ -348,37 +428,15 @@ function openUntracked($db) {
     if ($null -eq $idx) { return $false }
     $planFile = $available[$idx]
 
-    Write-Host ''
-    Write-Host 'Initial state:  [D] Discussing (default)  [I] In-progress  [R] Ready'
-    $key = readStateKey
-    $state = switch ($key.Key) { 'I' { 'in-progress' } 'R' { 'ready' } default { 'discussing' } }
-
     $entry = [pscustomobject]@{
         planFile   = $planFile
-        state      = $state
         cwd        = normalizePath $PWD.Path
         sessionIds = @()
     }
     $db.Add($entry)
 
     clearConsole
-    if ($state -eq 'ready') {
-        $entry.state = 'in-progress'
-        saveDb $db $dbPath
-        writeLaunchIntent $entry.planFile $entry.cwd
-        $exitCode = launchCl $entry.cwd "Please do the next step in $planFile"
-        clearLaunchIntent
-        showLaunchError $exitCode
-        if ($exitCode -ne 0) { return $false }
-    } else {
-        saveDb $db $dbPath
-        writeLaunchIntent $entry.planFile $entry.cwd
-        $exitCode = launchCl $entry.cwd "We're starting work on $planFile - please review, and then let's discuss next steps."
-        clearLaunchIntent
-        showLaunchError $exitCode
-        if ($exitCode -ne 0) { return $false }
-    }
-    return $true
+    return openProject $db $entry @()
 }
 
 function registerProject($db, $orphans, $liveSessionIds) {
@@ -417,10 +475,10 @@ function registerProject($db, $orphans, $liveSessionIds) {
     if (-not $entry) {
         $entry = [pscustomobject]@{
             planFile   = $planFile
-            state      = 'in-progress'
             cwd        = normalizePath $PWD.Path
             sessionIds = @()
         }
+        $entry | Add-Member -NotePropertyName state -NotePropertyValue (Get-PlanState -PlanFile $planFile).State
         $db.Add($entry)
     }
 
@@ -466,7 +524,6 @@ function loadDb([string] $path) {
     return @($raw | Where-Object { $_.planFile } | ForEach-Object {
         [pscustomobject]@{
             planFile   = $_.planFile
-            state      = $_.state
             cwd        = $_.cwd
             sessionIds = @($_.sessionIds | Where-Object { $_ })
         }
@@ -475,7 +532,11 @@ function loadDb([string] $path) {
 
 function saveDb($db, [string] $path) {
     $null = New-Item -ItemType Directory -Path (Split-Path $path) -Force
-    (ConvertTo-Json -InputObject @($db) -Depth 5) | Set-Content $path -Encoding UTF8
+    # Project to the persisted fields — in-memory entries also carry a computed state property.
+    $persisted = @($db | ForEach-Object {
+        [pscustomobject]@{ planFile = $_.planFile; cwd = $_.cwd; sessionIds = @($_.sessionIds) }
+    })
+    (ConvertTo-Json -InputObject $persisted -Depth 5) | Set-Content $path -Encoding UTF8
 }
 
 # --- Process detection ---
@@ -499,9 +560,8 @@ function resolveSessionIds($entries, [string] $rDir, $livePids) {
 
     if (-not (Test-Path $rDir)) { return @{ liveSessionIds = $liveSessionIds; orphans = $orphans; notices = $notices } }
 
-    $unmatched = [System.Collections.Generic.List[object]]::new()
-
-    # Pass 1: resolve sessions already in the db by ID, populating liveSessionIds.
+    # Match running files by session ID, then by the planFile the hook stamped from CL_PLAN_FILE.
+    # Anything else is an orphan — R-register is the repair path.
     foreach ($file in Get-ChildItem $rDir -Filter 'pid_*.txt' -ErrorAction SilentlyContinue) {
         $filePid = [int]($file.BaseName -replace 'pid_', '')
         if ($filePid -notin $livePids) { continue }
@@ -509,40 +569,21 @@ function resolveSessionIds($entries, [string] $rDir, $livePids) {
         $data = Get-Content $file.FullName -Raw | ConvertFrom-Json -ErrorAction SilentlyContinue
         if (-not $data -or -not $data.session_id -or -not $data.cwd) { continue }
 
-        if ($sidMap.ContainsKey($data.session_id)) {
-            $null = $liveSessionIds.Add($data.session_id)
-        } elseif ($data.planFile) {
-            $planEntry = $entries | Where-Object { $_.planFile -eq $data.planFile } | Select-Object -First 1
+        if (-not $sidMap.ContainsKey($data.session_id)) {
+            $planEntry = $null
+            if ($data.planFile) {
+                $planEntry = $entries | Where-Object { $_.planFile -eq $data.planFile } | Select-Object -First 1
+            }
             if ($planEntry) {
                 if ($data.session_id -notin $planEntry.sessionIds) {
                     $planEntry.sessionIds = @($planEntry.sessionIds) + @($data.session_id)
                 }
                 $sidMap[$data.session_id] = $planEntry
-                $null = $liveSessionIds.Add($data.session_id)
             } else {
-                $unmatched.Add($data)
+                $orphans.Add($data.session_id) | Out-Null
             }
-        } else {
-            $unmatched.Add($data)
         }
-    }
-
-    # Pass 2: cwd-match new sessions, excluding entries already occupied by a live session.
-    # This lets a new session find the correct entry even when multiple entries share a cwd.
-    foreach ($data in $unmatched) {
-        $sid        = $data.session_id
-        $fileCwd    = normalizePath $data.cwd
-        $cwdMatches = @($entries | Where-Object { (normalizePath $_.cwd) -eq $fileCwd -and -not (isLive $_ $liveSessionIds) })
-        $cwdEntry   = if ($cwdMatches.Count -eq 1) { $cwdMatches[0] } else { $null }
-
-        if ($cwdEntry) {
-            $cwdEntry.sessionIds = @($cwdEntry.sessionIds) + @($sid)
-            $sidMap[$sid] = $cwdEntry
-        } else {
-            $orphans.Add($sid) | Out-Null
-        }
-
-        $null = $liveSessionIds.Add($sid)
+        $null = $liveSessionIds.Add($data.session_id)
     }
 
     return @{ liveSessionIds = $liveSessionIds; orphans = $orphans; notices = $notices }
@@ -638,19 +679,5 @@ function getPlanTitle([string] $path) {
 }
 
 function normalizePath([string] $p) { $p -replace '\\', '/' }
-
-function writeLaunchIntent([string] $planFile, [string] $cwd) {
-    $null = New-Item -ItemType Directory $runningDir -Force
-    # Store the role dir as cwd — that's what the session reports once Invoke-AgentSession
-    # does Push-Location $roleDir before launching.
-    $roleDir = (& "$home/prefs/lib/agents/Get-AgentRoleContext.ps1" -cwd $cwd).roleDir
-    [pscustomobject]@{planFile = $planFile; cwd = $roleDir} |
-        ConvertTo-Json -Compress |
-        Set-Content "$runningDir/launch_intent.json" -Encoding UTF8
-}
-
-function clearLaunchIntent {
-    Remove-Item "$runningDir/launch_intent.json" -Force -ErrorAction SilentlyContinue
-}
 
 if ($MyInvocation.InvocationName -ne '.') { main }

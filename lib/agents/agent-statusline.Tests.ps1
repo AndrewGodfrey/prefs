@@ -119,6 +119,27 @@ Describe "claude-statusline" {
         }
     }
 
+    Context "CL_PLAN_FILE display" {
+        It "shows the plan name (no extension) when CL_PLAN_FILE is set" {
+            try {
+                $env:CL_PLAN_FILE = 'C:/plans/myplan-upgrade.md'
+                $json = @{ context_window = @{ used_percentage = 10 }; cwd = $env:TEMP } | ConvertTo-Json
+                $out  = ($json | pwsh -NoProfile -File "$PSScriptRoot/agent-statusline.ps1") -join ''
+                $out | Should -Match 'myplan-upgrade'
+                $out | Should -Not -Match 'myplan-upgrade\.md'
+            } finally {
+                Remove-Item Env:\CL_PLAN_FILE -ErrorAction SilentlyContinue
+            }
+        }
+
+        It "shows no plan segment when CL_PLAN_FILE is unset" {
+            Remove-Item Env:\CL_PLAN_FILE -ErrorAction SilentlyContinue
+            $json = @{ context_window = @{ used_percentage = 10 }; cwd = $env:TEMP } | ConvertTo-Json
+            $out  = ($json | pwsh -NoProfile -File "$PSScriptRoot/agent-statusline.ps1") -join ''
+            $out | Should -Not -Match 'plan:'
+        }
+    }
+
     Context "no rate limits" {
         It "no rl section when rate_limits absent" {
             $json = @{ context_window = @{ used_percentage = 10 }; cwd = $env:TEMP } | ConvertTo-Json

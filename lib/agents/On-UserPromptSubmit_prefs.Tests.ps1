@@ -6,249 +6,43 @@ BeforeAll {
     . "$PSScriptRoot/On-UserPromptSubmit_prefs.ps1"
 }
 
-Describe "getIntentPlanFile" {
-    It "returns null when intent file does not exist" {
-        $result = getIntentPlanFile "C:/de" "TestDrive:\no-file.json"
-
-        $result | Should -BeNull
-    }
-
-    It "returns null when cwd does not match intent" {
-        $intentPath = "TestDrive:\intent-cwd-mismatch.json"
-        '{"planFile":"C:/plans/foo.md","cwd":"C:/other"}' | Set-Content $intentPath
-
-        $result = getIntentPlanFile "C:/de" (Get-Item $intentPath).FullName
-
-        $result | Should -BeNull
-        Test-Path $intentPath | Should -BeTrue    # not consumed
-    }
-
-    It "returns planFile and removes intent file when cwd matches" {
-        $intentPath = "TestDrive:\intent-match.json"
-        '{"planFile":"C:/plans/foo.md","cwd":"C:/de"}' | Set-Content $intentPath
-
-        $result = getIntentPlanFile "C:/de" (Get-Item $intentPath).FullName
-
-        $result            | Should -Be "C:/plans/foo.md"
-        Test-Path $intentPath | Should -BeFalse    # consumed
-    }
-
-    It "normalizes backslash cwd from intent file" {
-        $intentPath = "TestDrive:\intent-backslash.json"
-        '{"planFile":"C:/plans/foo.md","cwd":"C:\\de"}' | Set-Content $intentPath
-
-        $result = getIntentPlanFile "C:/de" (Get-Item $intentPath).FullName
-
-        $result | Should -Be "C:/plans/foo.md"
-    }
-
-    It "normalizes backslash cwd argument" {
-        $intentPath = "TestDrive:\intent-backslash-arg.json"
-        '{"planFile":"C:/plans/foo.md","cwd":"C:/de"}' | Set-Content $intentPath
-
-        $result = getIntentPlanFile 'C:\de' (Get-Item $intentPath).FullName
-
-        $result | Should -Be "C:/plans/foo.md"
-    }
-
-    It "returns null when intent file is malformed JSON" {
-        $intentPath = "TestDrive:\intent-bad-json.json"
-        'not json' | Set-Content $intentPath
-
-        $result = getIntentPlanFile "C:/de" (Get-Item $intentPath).FullName
-
-        $result | Should -BeNull
-    }
-}
-
-Describe "Update-CredentialsIfExpiring" {
+Describe "Save-PidSessionRecord" {
     BeforeAll {
-        $calls = [System.Collections.Generic.List[hashtable]]::new()
-
-        function Invoke-RestMethod {
-            param($Uri, $Method, $ContentType, $Body)
-            $calls.Add(@{ Uri = $Uri; Body = ($Body | ConvertFrom-Json) })
-            return [PSCustomObject]@{ access_token = 'new-access'; refresh_token = 'new-refresh'; expires_in = 3600 }
-        }
-
-        function Write-CredFile($path, $accessToken, $refreshToken, $expiresAtMs) {
-            $oauth = [ordered]@{ accessToken = $accessToken; expiresAt = $expiresAtMs }
-            if ($null -ne $refreshToken) { $oauth['refreshToken'] = $refreshToken }
-            @{ claudeAiOauth = $oauth } | ConvertTo-Json -Depth 5 | Set-Content $path -Encoding UTF8
-        }
+        function Get-HarnessPid { param([string] $harnessName) 4242 }
     }
 
     BeforeEach {
-        $calls.Clear()
-        $testDir = "TestDrive:\creds-$([Guid]::NewGuid())"
-        New-Item -ItemType Directory $testDir | Out-Null
-        $base = ((Get-Item $testDir).FullName -replace '\\', '/').TrimEnd('/')
-        $script:credsPath   = "$base/.credentials.json"
-        $script:logPath     = "$base/token_refresh.log"
-        $script:backoffPath = "$base/token_refresh_backoff.txt"
+        $script:runDir = "TestDrive:\running-$([guid]::NewGuid().ToString('N'))"
+        Remove-Item Env:\CL_PLAN_FILE -ErrorAction SilentlyContinue
     }
 
-    Context "fast path — token valid with >10 min remaining" {
-        It "makes no HTTP call" {
-            $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-            Write-CredFile $script:credsPath 'orig-access' 'orig-refresh' ($nowMs + 20 * 60 * 1000)
-
-            Update-CredentialsIfExpiring -CredsPath $script:credsPath -LogPath $script:logPath -BackoffPath $script:backoffPath
-
-            $calls.Count | Should -Be 0
-        }
-
-        It "leaves the file unchanged" {
-            $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-            Write-CredFile $script:credsPath 'orig-access' 'orig-refresh' ($nowMs + 20 * 60 * 1000)
-            $before = Get-Content $script:credsPath -Raw
-
-            Update-CredentialsIfExpiring -CredsPath $script:credsPath -LogPath $script:logPath -BackoffPath $script:backoffPath
-
-            (Get-Content $script:credsPath -Raw) | Should -Be $before
-        }
+    AfterEach {
+        Remove-Item Env:\CL_PLAN_FILE -ErrorAction SilentlyContinue
     }
 
-    Context "token near expiry (<= 10 min remaining)" {
-        BeforeEach {
-            $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-            Write-CredFile $script:credsPath 'orig-access' 'orig-refresh' ($nowMs + 5 * 60 * 1000)
-        }
+    It "stamps planFile from CL_PLAN_FILE into the running file" {
+        $env:CL_PLAN_FILE = 'C:/plans/foo.md'
 
-        It "calls the token endpoint" {
-            Update-CredentialsIfExpiring -CredsPath $script:credsPath -LogPath $script:logPath -BackoffPath $script:backoffPath -TokenEndpoint 'https://example.com/token'
+        Save-PidSessionRecord ([pscustomobject]@{session_id = 'sid-1'; cwd = 'C:/de'}) 'claude' $script:runDir
 
-            $calls.Count | Should -Be 1
-            $calls[0].Uri | Should -Be 'https://example.com/token'
-        }
-
-        It "sends the existing refresh token and client_id in the request body" {
-            Update-CredentialsIfExpiring -CredsPath $script:credsPath -LogPath $script:logPath -BackoffPath $script:backoffPath -ClientId 'test-client'
-
-            $calls[0].Body.refresh_token | Should -Be 'orig-refresh'
-            $calls[0].Body.client_id     | Should -Be 'test-client'
-            $calls[0].Body.grant_type    | Should -Be 'refresh_token'
-        }
-
-        It "writes the new access token" {
-            Update-CredentialsIfExpiring -CredsPath $script:credsPath -LogPath $script:logPath -BackoffPath $script:backoffPath
-
-            $updated = (Get-Content $script:credsPath -Raw | ConvertFrom-Json).claudeAiOauth
-            $updated.accessToken | Should -Be 'new-access'
-        }
-
-        It "writes the new refresh token" {
-            Update-CredentialsIfExpiring -CredsPath $script:credsPath -LogPath $script:logPath -BackoffPath $script:backoffPath
-
-            $updated = (Get-Content $script:credsPath -Raw | ConvertFrom-Json).claudeAiOauth
-            $updated.refreshToken | Should -Be 'new-refresh'
-        }
-
-        It "writes a future expiresAt (approximately now + expires_in)" {
-            $before = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-            Update-CredentialsIfExpiring -CredsPath $script:credsPath -LogPath $script:logPath -BackoffPath $script:backoffPath
-            $after = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-
-            $updated = (Get-Content $script:credsPath -Raw | ConvertFrom-Json).claudeAiOauth
-            $updated.expiresAt | Should -BeGreaterThan $before
-            $updated.expiresAt | Should -BeLessOrEqual ($after + 3600 * 1000)
-        }
+        $data = Get-Content "$script:runDir/pid_4242.txt" -Raw | ConvertFrom-Json
+        $data.session_id | Should -Be 'sid-1'
+        $data.cwd        | Should -Be 'C:/de'
+        $data.planFile   | Should -Be 'C:/plans/foo.md'
     }
 
-    Context "token already expired" {
-        It "refreshes" {
-            $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-            Write-CredFile $script:credsPath 'orig-access' 'orig-refresh' ($nowMs - 1000)
+    It "omits planFile when CL_PLAN_FILE is unset" {
+        Save-PidSessionRecord ([pscustomobject]@{session_id = 'sid-1'; cwd = 'C:/de'}) 'claude' $script:runDir
 
-            Update-CredentialsIfExpiring -CredsPath $script:credsPath -LogPath $script:logPath -BackoffPath $script:backoffPath
-
-            $calls.Count | Should -Be 1
-        }
+        $data = Get-Content "$script:runDir/pid_4242.txt" -Raw | ConvertFrom-Json
+        $data.session_id | Should -Be 'sid-1'
+        $data.PSObject.Properties['planFile'] | Should -BeNull
     }
 
-    Context "response has no new refresh_token" {
-        It "preserves the original refresh token" {
-            function Invoke-RestMethod {
-                param($Uri, $Method, $ContentType, $Body)
-                return [PSCustomObject]@{ access_token = 'new-access'; expires_in = 3600 }
-            }
-            $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-            Write-CredFile $script:credsPath 'orig-access' 'orig-refresh' ($nowMs - 1000)
+    It "writes nothing when session_id is missing" {
+        Save-PidSessionRecord ([pscustomobject]@{cwd = 'C:/de'}) 'claude' $script:runDir
 
-            Update-CredentialsIfExpiring -CredsPath $script:credsPath -LogPath $script:logPath -BackoffPath $script:backoffPath
-
-            $updated = (Get-Content $script:credsPath -Raw | ConvertFrom-Json).claudeAiOauth
-            $updated.refreshToken | Should -Be 'orig-refresh'
-        }
-    }
-
-    Context "credentials file missing" {
-        It "does not throw and makes no HTTP call" {
-            { Update-CredentialsIfExpiring -CredsPath 'C:/nonexistent/.credentials.json' -LogPath $script:logPath -BackoffPath $script:backoffPath } | Should -Not -Throw
-
-            $calls.Count | Should -Be 0
-        }
-    }
-
-    Context "refreshToken missing from credentials" {
-        It "makes no HTTP call" {
-            $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-            Write-CredFile $script:credsPath 'orig-access' $null ($nowMs - 1000)
-
-            Update-CredentialsIfExpiring -CredsPath $script:credsPath -LogPath $script:logPath -BackoffPath $script:backoffPath
-
-            $calls.Count | Should -Be 0
-        }
-    }
-
-    Context "backoff — prior attempt within backoff window" {
-        It "makes no HTTP call" {
-            $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-            Write-CredFile $script:credsPath 'orig-access' 'orig-refresh' ($nowMs - 1000)
-            $nextAllowed = $nowMs + 5 * 60 * 1000
-            Set-Content $script:backoffPath "$nextAllowed" -Encoding UTF8
-
-            Update-CredentialsIfExpiring -CredsPath $script:credsPath -LogPath $script:logPath -BackoffPath $script:backoffPath
-
-            $calls.Count | Should -Be 0
-        }
-    }
-
-    Context "backoff — prior attempt outside backoff window" {
-        It "attempts refresh" {
-            $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-            Write-CredFile $script:credsPath 'orig-access' 'orig-refresh' ($nowMs - 1000)
-            $nextAllowed = $nowMs - 1000
-            Set-Content $script:backoffPath "$nextAllowed" -Encoding UTF8
-
-            Update-CredentialsIfExpiring -CredsPath $script:credsPath -LogPath $script:logPath -BackoffPath $script:backoffPath
-
-            $calls.Count | Should -Be 1
-        }
-    }
-
-    Context "backoff — successful refresh clears backoff file" {
-        It "removes the backoff file" {
-            $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-            Write-CredFile $script:credsPath 'orig-access' 'orig-refresh' ($nowMs - 1000)
-
-            Update-CredentialsIfExpiring -CredsPath $script:credsPath -LogPath $script:logPath -BackoffPath $script:backoffPath
-
-            Test-Path $script:backoffPath | Should -BeFalse
-        }
-    }
-
-    Context "HTTP call fails" {
-        It "does not throw and leaves the file unchanged" {
-            function Invoke-RestMethod { param($Uri, $Method, $ContentType, $Body); throw 'network error' }
-            $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-            Write-CredFile $script:credsPath 'orig-access' 'orig-refresh' ($nowMs - 1000)
-            $before = Get-Content $script:credsPath -Raw
-
-            { Update-CredentialsIfExpiring -CredsPath $script:credsPath -LogPath $script:logPath -BackoffPath $script:backoffPath } | Should -Not -Throw
-
-            (Get-Content $script:credsPath -Raw) | Should -Be $before
-        }
+        Test-Path $script:runDir | Should -BeFalse
     }
 }
 

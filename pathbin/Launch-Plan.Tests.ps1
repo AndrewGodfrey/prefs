@@ -11,7 +11,7 @@ Describe "loadDb" {
         @(loadDb "TestDrive:\nonexistent.json") | Should -HaveCount 0
     }
 
-    It "returns entries with correct fields" {
+    It "returns entries with correct fields, ignoring a legacy state field" {
         $json = '[{"planFile":"C:/plans/foo.md","state":"ready","cwd":"C:/de","sessionIds":["abc"]}]'
         Set-Content "TestDrive:\db-load1.json" $json
 
@@ -19,9 +19,9 @@ Describe "loadDb" {
 
         @($result)               | Should -HaveCount 1
         $result[0].planFile      | Should -Be "C:/plans/foo.md"
-        $result[0].state         | Should -Be "ready"
         $result[0].cwd           | Should -Be "C:/de"
         @($result[0].sessionIds) | Should -Be @("abc")
+        $result[0].PSObject.Properties['state'] | Should -BeNull
     }
 
     It "returns empty sessionIds array when field is absent" {
@@ -53,7 +53,6 @@ Describe "saveDb / loadDb round-trip" {
     It "preserves all fields including multiple sessionIds" {
         $entries = @([pscustomobject]@{
             planFile   = "C:/plans/bar.md"
-            state      = "in-progress"
             cwd        = "C:/de"
             sessionIds = @("sid1", "sid2")
         })
@@ -63,13 +62,20 @@ Describe "saveDb / loadDb round-trip" {
 
         @($result)                 | Should -HaveCount 1
         $result[0].planFile        | Should -Be "C:/plans/bar.md"
-        $result[0].state           | Should -Be "in-progress"
         @($result[0].sessionIds)   | Should -Be @("sid1", "sid2")
+    }
+
+    It "does not persist a computed state property" {
+        $entries = @([pscustomobject]@{planFile = "C:/plans/bar.md"; cwd = "C:/de"; sessionIds = @(); state = "ready-to-plan"})
+
+        saveDb $entries "TestDrive:\rt-nostate.json"
+
+        (Get-Content "TestDrive:\rt-nostate.json" -Raw) | Should -Not -Match 'state'
     }
 
     It "round-trips a List with entries" {
         $db = [System.Collections.Generic.List[object]]::new()
-        $db.Add([pscustomobject]@{planFile = "C:/plans/foo.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()})
+        $db.Add([pscustomobject]@{planFile = "C:/plans/foo.md"; cwd = "C:/de"; sessionIds = @()})
 
         saveDb $db "TestDrive:\rt-list.json"
         $result = loadDb "TestDrive:\rt-list.json"
@@ -88,6 +94,71 @@ Describe "saveDb / loadDb round-trip" {
     }
 }
 
+Describe "loadLauncherDb" {
+    It "drops entries whose planFile no longer exists" {
+        $plansDir = ((New-Item -ItemType Directory "TestDrive:\plans-stale").FullName -replace '\\', '/').TrimEnd('/')
+        Set-Content "$plansDir/alive.md" '# alive'
+        @(
+            @{planFile = "$plansDir/alive.md"; cwd = "C:/de"; sessionIds = @()}
+            @{planFile = "$plansDir/deleted.md"; cwd = "C:/de"; sessionIds = @("sid-1")}
+        ) | ConvertTo-Json | Set-Content "TestDrive:\db-stale.json"
+
+        $db = loadLauncherDb "TestDrive:\db-stale.json"
+
+        @($db.planFile) | Should -Be @("$plansDir/alive.md")
+    }
+
+    It "keeps an entry whose planFile contains glob characters" {
+        $plansDir = ((New-Item -ItemType Directory "TestDrive:\plans-glob").FullName -replace '\\', '/').TrimEnd('/')
+        Set-Content -LiteralPath "$plansDir/plan[1].md" '# glob'
+        @(@{planFile = "$plansDir/plan[1].md"; cwd = "C:/de"; sessionIds = @()}) |
+            ConvertTo-Json -AsArray | Set-Content "TestDrive:\db-glob.json"
+
+        $db = loadLauncherDb "TestDrive:\db-glob.json"
+
+        @($db.planFile) | Should -Be @("$plansDir/plan[1].md")
+    }
+}
+
+Describe "attachPlanStates" {
+    It "attaches frontmatter state; a plan without frontmatter gets null" {
+        $plansDir = ((New-Item -ItemType Directory "TestDrive:\plans-attach").FullName -replace '\\', '/').TrimEnd('/')
+        Set-Content "$plansDir/with.md" @('# t', '', '## Step 1: x')
+        Set-Content "$plansDir/without.md" '# t'
+        $null = Set-PlanState -PlanFile "$plansDir/with.md" -State 'code-complete'
+        $db = @(
+            [pscustomobject]@{planFile = "$plansDir/with.md"; cwd = "C:/de"; sessionIds = @()}
+            [pscustomobject]@{planFile = "$plansDir/without.md"; cwd = "C:/de"; sessionIds = @()}
+        )
+
+        attachPlanStates $db
+
+        $db[0].state | Should -Be 'code-complete'
+        $db[1].state | Should -BeNullOrEmpty
+    }
+}
+
+Describe "indexOfPlan" {
+    BeforeAll {
+        $script:idxDb = @(
+            [pscustomobject]@{planFile = "C:/plans/a.md"; cwd = "C:/de"; sessionIds = @()}
+            [pscustomobject]@{planFile = "C:/plans/b.md"; cwd = "C:/de"; sessionIds = @()}
+        )
+    }
+
+    It "returns the index of the matching planFile" {
+        indexOfPlan $script:idxDb "C:/plans/b.md" | Should -Be 1
+    }
+
+    It "returns 0 when the planFile is not in the list" {
+        indexOfPlan $script:idxDb "C:/plans/gone.md" | Should -Be 0
+    }
+
+    It "returns 0 for a null planFile" {
+        indexOfPlan $script:idxDb $null | Should -Be 0
+    }
+}
+
 Describe "resolveSessionIds" {
     It "leaves db unchanged when running dir doesn't exist" {
         $db = @([pscustomobject]@{planFile = "f.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()})
@@ -97,15 +168,17 @@ Describe "resolveSessionIds" {
         @($db[0].sessionIds) | Should -HaveCount 0
     }
 
-    It "adds session_id when running file cwd matches db entry cwd" {
+    It "treats a cwd-matching untracked session as an orphan (no cwd fallback)" {
         $rDir = "TestDrive:\running-match"
         $null = New-Item -ItemType Directory $rDir
         '{"session_id":"abc-123","cwd":"C:/de"}' | Set-Content "$rDir\pid_99.txt"
-        $db = @([pscustomobject]@{planFile = "f.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()})
+        $db = @([pscustomobject]@{planFile = "f.md"; cwd = "C:/de"; sessionIds = @()})
 
-        resolveSessionIds $db $rDir @(99)
+        $result = resolveSessionIds $db $rDir @(99)
 
-        $db[0].sessionIds | Should -Contain "abc-123"
+        @($db[0].sessionIds)   | Should -HaveCount 0
+        $result.orphans        | Should -Contain "abc-123"
+        $result.liveSessionIds | Should -Contain "abc-123"
     }
 
     It "doesn't duplicate an already-present session_id" {
@@ -119,20 +192,20 @@ Describe "resolveSessionIds" {
         @($db[0].sessionIds) | Should -HaveCount 1
     }
 
-    It "assigns untracked session to the only unoccupied cwd-matching entry" {
+    It "does not cwd-match an untracked session even when only one entry shares the cwd" {
         $rDir = "TestDrive:\running-unoccupied"
         $null = New-Item -ItemType Directory $rDir
         '{"session_id":"live-sid","cwd":"C:/de"}' | Set-Content "$rDir\pid_99.txt"
         '{"session_id":"new-sid","cwd":"C:/de"}'  | Set-Content "$rDir\pid_100.txt"
-        $entry1 = [pscustomobject]@{planFile = "f1.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @("live-sid")}
-        $entry2 = [pscustomobject]@{planFile = "f2.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
+        $entry1 = [pscustomobject]@{planFile = "f1.md"; cwd = "C:/de"; sessionIds = @("live-sid")}
+        $entry2 = [pscustomobject]@{planFile = "f2.md"; cwd = "C:/de"; sessionIds = @()}
         $db = @($entry1, $entry2)
 
         $result = resolveSessionIds $db $rDir @(99, 100)
 
         @($entry1.sessionIds) | Should -HaveCount 1     # live-sid not duplicated
-        $entry2.sessionIds    | Should -Contain "new-sid"
-        $result.orphans       | Should -Not -Contain "new-sid"
+        @($entry2.sessionIds) | Should -HaveCount 0
+        $result.orphans       | Should -Contain "new-sid"
     }
 
     It "treats session as orphan when cwd matches multiple entries" {
@@ -166,17 +239,17 @@ Describe "resolveSessionIds" {
         $result.liveSessionIds | Should -Contain "new-sid"
     }
 
-    It "falls through to cwd matching when planFile doesn't match any db entry" {
+    It "treats session as orphan when planFile doesn't match any db entry" {
         $rDir = "TestDrive:\running-planfile-miss"
         $null = New-Item -ItemType Directory $rDir
         '{"session_id":"new-sid","cwd":"C:/de","planFile":"unknown.md"}' | Set-Content "$rDir\pid_99.txt"
-        $entry = [pscustomobject]@{planFile = "f1.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
+        $entry = [pscustomobject]@{planFile = "f1.md"; cwd = "C:/de"; sessionIds = @()}
         $db = @($entry)
 
         $result = resolveSessionIds $db $rDir @(99)
 
-        $entry.sessionIds  | Should -Contain "new-sid"   # cwd fallthrough assigns it
-        $result.orphans    | Should -Not -Contain "new-sid"
+        @($entry.sessionIds) | Should -HaveCount 0
+        $result.orphans      | Should -Contain "new-sid"
     }
 
     It "doesn't add session_id when cwd doesn't match" {
@@ -201,17 +274,18 @@ Describe "resolveSessionIds" {
         @($db[0].sessionIds) | Should -HaveCount 0
     }
 
-    It "adds session_id only from live pid files" {
+    It "processes only live pid files" {
         $rDir = "TestDrive:\running-livePid"
         $null = New-Item -ItemType Directory $rDir
-        '{"session_id":"live-sid","cwd":"C:/de"}' | Set-Content "$rDir\pid_99.txt"
-        '{"session_id":"dead-sid","cwd":"C:/de"}' | Set-Content "$rDir\pid_77.txt"
-        $db = @([pscustomobject]@{planFile = "f.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()})
+        '{"session_id":"live-sid","cwd":"C:/de","planFile":"f.md"}' | Set-Content "$rDir\pid_99.txt"
+        '{"session_id":"dead-sid","cwd":"C:/de","planFile":"f.md"}' | Set-Content "$rDir\pid_77.txt"
+        $db = @([pscustomobject]@{planFile = "f.md"; cwd = "C:/de"; sessionIds = @()})
 
-        resolveSessionIds $db $rDir @(99)   # only pid 99 is live
+        $result = resolveSessionIds $db $rDir @(99)   # only pid 99 is live
 
-        $db[0].sessionIds | Should -Contain "live-sid"
-        $db[0].sessionIds | Should -Not -Contain "dead-sid"
+        $db[0].sessionIds      | Should -Contain "live-sid"
+        $db[0].sessionIds      | Should -Not -Contain "dead-sid"
+        $result.liveSessionIds | Should -Not -Contain "dead-sid"
     }
 
     It "returns orphan session_id in result" {
@@ -424,159 +498,334 @@ Describe "checkSyncPath" {
 }
 
 Describe "openProject" {
+    BeforeAll {
+        $script:plansRoot = ((New-Item -ItemType Directory "TestDrive:\plans-open").FullName -replace '\\', '/').TrimEnd('/')
+
+        # Creates a plan file with one step heading; $state $null leaves it without frontmatter.
+        function newPlan([string] $name, [string] $state) {
+            $path = "$script:plansRoot/$name.md"
+            Set-Content $path @("# $name", "", "## Step 1: first")
+            if ($state) { $null = Set-PlanState -PlanFile $path -State $state }
+            return $path
+        }
+
+        function newDb($entry) {
+            $db = [System.Collections.Generic.List[object]]::new()
+            $db.Add($entry)
+            return ,$db
+        }
+
+        function newEntry([string] $planFile, [string[]] $sessionIds = @()) {
+            return [pscustomobject]@{planFile = $planFile; cwd = "C:/de"; sessionIds = $sessionIds}
+        }
+
+        function newInfo([string] $sid, [datetime] $lastActive) {
+            return [pscustomobject]@{sid = $sid; lastActive = $lastActive; summary = "summary of $sid"}
+        }
+    }
+
     BeforeEach {
         Mock saveDb { }
-        Mock launchCl { return 0 }
         Mock Write-Host { }
-        Mock writeLaunchIntent { }
-        Mock clearLaunchIntent { }
-    }
-
-    It "ready + not live: transitions to in-progress, clears sessionIds, launches" {
-        $db    = [System.Collections.Generic.List[object]]::new()
-        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "ready"; cwd = "C:/de"; sessionIds = @()}
-        $db.Add($entry)
-
-        openProject $db $entry @()
-
-        $entry.state             | Should -Be "in-progress"
-        @($entry.sessionIds)     | Should -HaveCount 0
-        Should -Invoke launchCl -Times 1
-    }
-
-    It "ready + live: does nothing, does not launch, returns false" {
-        $db    = [System.Collections.Generic.List[object]]::new()
-        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "ready"; cwd = "C:/de"; sessionIds = @("live-sid")}
-        $db.Add($entry)
+        Mock clearConsole { }
         Mock Read-Host { "" }
+        Mock getSessionInfos { @() }
+        Mock pickFromList { }
+        $script:launched = $null
+        Mock launchCl { $script:launched = @{cwd = $cwd; planFile = $planFile; rest = @($args)}; return 0 }
+    }
+
+    It "live entry: does not launch, returns false" {
+        $entry = newEntry (newPlan 'live' 'ready-to-implement') @("live-sid")
+        $db    = newDb $entry
 
         $result = openProject $db $entry @("live-sid")
 
-        $result       | Should -BeFalse
-        $entry.state  | Should -Be "ready"
+        $result | Should -BeFalse
         Should -Invoke launchCl -Times 0
     }
 
-    It "non-ready + live: does nothing, does not launch, returns false" {
-        $db    = [System.Collections.Generic.List[object]]::new()
-        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "in-progress"; cwd = "C:/de"; sessionIds = @("live-sid")}
-        $db.Add($entry)
-        Mock Read-Host { "" }
+    It "ready-to-implement + no sessions: fresh launch with do-the-next-step prompt" {
+        $plan  = newPlan 'rti' 'ready-to-implement'
+        $entry = newEntry $plan
+        $db    = newDb $entry
 
-        $result = openProject $db $entry @("live-sid")
+        $result = openProject $db $entry @()
 
-        $result       | Should -BeFalse
-        $entry.state  | Should -Be "in-progress"
-        Should -Invoke launchCl -Times 0
+        $result                   | Should -BeTrue
+        $script:launched.planFile | Should -Be $plan
+        $script:launched.rest[0]  | Should -Be "Please do the next step in $plan"
     }
 
-    It "non-ready + no sid: updates cwd before launching" {
-        $db    = [System.Collections.Generic.List[object]]::new()
-        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "discussing"; cwd = "C:/old"; sessionIds = @()}
-        $db.Add($entry)
+    It "ready-to-plan + no sessions: fresh launch with plan-the-next-step prompt" {
+        $plan  = newPlan 'rtp' 'ready-to-plan'
+        $entry = newEntry $plan
+        $db    = newDb $entry
 
         openProject $db $entry @()
 
-        $entry.cwd           | Should -Be (normalizePath $PWD.Path)
-        Should -Invoke launchCl -Times 1
+        $script:launched.rest[0] | Should -Be "Please plan the next step in $plan"
     }
 
-    It "discussing + no sid: transitions state to in-progress" {
-        $db    = [System.Collections.Generic.List[object]]::new()
-        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
-        $db.Add($entry)
+    It "code-complete + no sessions: fresh launch with review prompt" {
+        $plan  = newPlan 'cc' 'code-complete'
+        $entry = newEntry $plan
+        $db    = newDb $entry
 
         openProject $db $entry @()
 
-        $entry.state | Should -Be "in-progress"
+        $script:launched.rest[0] | Should -Match 'code-complete'
+        $script:launched.rest[0] | Should -Match 'review'
     }
 
-    It "in-progress + no sid: does not change state" {
-        $db    = [System.Collections.Generic.List[object]]::new()
-        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "in-progress"; cwd = "C:/de"; sessionIds = @()}
-        $db.Add($entry)
+    It "no frontmatter: treated as ready-to-plan" {
+        $plan  = newPlan 'bare' $null
+        $entry = newEntry $plan
+        $db    = newDb $entry
 
         openProject $db $entry @()
 
-        $entry.state | Should -Be "in-progress"
+        $script:launched.rest[0] | Should -Be "Please plan the next step in $plan"
     }
 
-    It "new session launch: writes launch intent with planFile and clears it after" {
-        $db    = [System.Collections.Generic.List[object]]::new()
-        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
-        $db.Add($entry)
-        $script:capturedIntentPlanFile = $null
-        Mock writeLaunchIntent { param([string] $planFile) $script:capturedIntentPlanFile = $planFile }
+    It "fresh launch: updates cwd and saves db" {
+        $entry = newEntry (newPlan 'cwd' 'ready-to-implement')
+        $entry.cwd = "C:/old"
+        $db    = newDb $entry
 
         openProject $db $entry @()
 
-        $script:capturedIntentPlanFile | Should -Be "C:/plans/foo.md"
-        Should -Invoke clearLaunchIntent -Times 1
+        $entry.cwd | Should -Be (normalizePath $PWD.Path)
+        Should -Invoke saveDb -Times 1
     }
 
-    It "ready + not live: writes launch intent before launching" {
-        $db    = [System.Collections.Generic.List[object]]::new()
-        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "ready"; cwd = "C:/de"; sessionIds = @()}
-        $db.Add($entry)
+    It "checkpointed: flips file state to ready-to-implement, launches fresh, keeps old sessions" {
+        $plan  = newPlan 'ckpt' 'checkpointed'
+        $entry = newEntry $plan @("old-sid")
+        $db    = newDb $entry
+        Mock getSessionInfos { @(newInfo 'old-sid' (Get-Date)) }
+
+        $result = openProject $db $entry @()
+
+        $result                               | Should -BeTrue
+        (Get-PlanState -PlanFile $plan).State | Should -Be 'ready-to-implement'
+        $script:launched.rest[0]              | Should -Be "Please do the next step in $plan"
+        @($entry.sessionIds)                  | Should -Be @("old-sid")
+    }
+
+    It "one resumable session: resumes it directly without a picker" {
+        $plan  = newPlan 'res1' 'ready-to-implement'
+        $entry = newEntry $plan @("sid-1")
+        $db    = newDb $entry
+        Mock getSessionInfos { @(newInfo 'sid-1' (Get-Date)) }
+        Mock pickFromList { throw 'picker should not be shown for a single session' }
+
+        $result = openProject $db $entry @()
+
+        $result               | Should -BeTrue
+        $script:launched.rest | Should -Contain "--resume"
+        $script:launched.rest | Should -Contain "sid-1"
+        @($entry.sessionIds)  | Should -Be @("sid-1")    # not clobbered
+    }
+
+    It "resumes for ready-to-plan and code-complete too when sessions exist" -TestCases @(
+        @{ State = 'ready-to-plan' }
+        @{ State = 'code-complete' }
+    ) {
+        param($State)
+        $plan  = newPlan "res-$State" $State
+        $entry = newEntry $plan @("sid-1")
+        $db    = newDb $entry
+        Mock getSessionInfos { @(newInfo 'sid-1' (Get-Date)) }
 
         openProject $db $entry @()
 
-        Should -Invoke writeLaunchIntent -Times 1
-        Should -Invoke clearLaunchIntent -Times 1
+        $script:launched.rest | Should -Contain "--resume"
     }
 
-    It "non-ready + single sid: saves sid and launches resume" {
-        $db    = [System.Collections.Generic.List[object]]::new()
-        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "in-progress"; cwd = "C:/de"; sessionIds = @("sid1")}
-        $db.Add($entry)
-        $script:capturedArgs = $null
-        Mock launchCl { $script:capturedArgs = $args; return 0 }
+    It "multiple sessions: picker shows at most the 3 most recent; picked one is resumed" {
+        $plan  = newPlan 'res-multi' 'ready-to-implement'
+        $entry = newEntry $plan @("sid-1", "sid-2", "sid-3", "sid-4")
+        $db    = newDb $entry
+        Mock getSessionInfos { @(
+            newInfo 'sid-1' (Get-Date '2026-06-04')
+            newInfo 'sid-2' (Get-Date '2026-06-03')
+            newInfo 'sid-3' (Get-Date '2026-06-02')
+            newInfo 'sid-4' (Get-Date '2026-06-01')
+        ) }
+        $script:pickerItems = $null
+        Mock pickFromList { $script:pickerItems = $items; return 1 }
 
         openProject $db $entry @()
 
-        @($entry.sessionIds)        | Should -Be @("sid1")
-        $script:capturedArgs        | Should -Contain "--resume"
+        @($script:pickerItems).sid | Should -Be @("sid-1", "sid-2", "sid-3")
+        $script:launched.rest      | Should -Contain "sid-2"
+        @($entry.sessionIds)       | Should -HaveCount 4    # not clobbered
     }
 
-    It "non-ready + multi-sid: saves picked sid as sole sid" {
-        $db    = [System.Collections.Generic.List[object]]::new()
-        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "in-progress"; cwd = "C:/de"; sessionIds = @("sid1", "sid2")}
-        $db.Add($entry)
-        Mock Read-Host { "0" }
-        $script:capturedArgs = $null
-        Mock launchCl { $script:capturedArgs = $args; return 0 }
-
-        openProject $db $entry @()
-
-        @($entry.sessionIds)        | Should -Be @("sid1")
-        $script:capturedArgs        | Should -Contain "--resume"
-    }
-
-    It "ready + cl fails: returns false" {
-        $db    = [System.Collections.Generic.List[object]]::new()
-        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "ready"; cwd = "C:/de"; sessionIds = @()}
-        $db.Add($entry)
-        Mock launchCl { return 1 }
-        Mock Read-Host { "" }
+    It "picker canceled: returns false without launching" {
+        $plan  = newPlan 'res-cancel' 'ready-to-implement'
+        $entry = newEntry $plan @("sid-1", "sid-2")
+        $db    = newDb $entry
+        Mock getSessionInfos { @((newInfo 'sid-1' (Get-Date)), (newInfo 'sid-2' (Get-Date))) }
+        Mock pickFromList { return $null }
 
         $result = openProject $db $entry @()
 
         $result | Should -BeFalse
+        Should -Invoke launchCl -Times 0
     }
 
-    It "non-ready + resume fails: clears session_ids, saves db twice, returns false" {
-        $db    = [System.Collections.Generic.List[object]]::new()
-        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "in-progress"; cwd = "C:/de"; sessionIds = @("expired-sid")}
-        $db.Add($entry)
+    It "sessions in db but none resumable (no jsonl): falls back to fresh launch" {
+        $plan  = newPlan 'res-gone' 'ready-to-implement'
+        $entry = newEntry $plan @("gone-sid")
+        $db    = newDb $entry
+
+        openProject $db $entry @()
+
+        $script:launched.rest[0] | Should -Be "Please do the next step in $plan"
+    }
+
+    It "failed resume: removes only the failed sid, keeps the rest, returns true" {
+        $plan  = newPlan 'res-fail' 'ready-to-implement'
+        $entry = newEntry $plan @("sid-1", "sid-2")
+        $db    = newDb $entry
+        Mock getSessionInfos { @(newInfo 'sid-1' (Get-Date)) }
         Mock launchCl { return 1 }
-        Mock clearConsole { }
-        Mock Read-Host { "" }
 
         $result = openProject $db $entry @()
 
-        $result              | Should -BeFalse
-        @($entry.sessionIds) | Should -HaveCount 0
-        Should -Invoke saveDb -Times 2
+        $result              | Should -BeTrue
+        @($entry.sessionIds) | Should -Be @("sid-2")
+        Should -Invoke saveDb -Times 1
+    }
+
+    It "fresh launch failure still returns true (TUI refreshes)" {
+        $entry = newEntry (newPlan 'fresh-fail' 'ready-to-implement')
+        $db    = newDb $entry
+        Mock launchCl { return 1 }
+
+        $result = openProject $db $entry @()
+
+        $result | Should -BeTrue
+    }
+}
+
+Describe "getLaunchAction" {
+    It "ready-to-plan, no sessions: fresh plan prompt" {
+        $a = getLaunchAction 'ready-to-plan' $false 'C:/p/x.md'
+
+        $a.kind     | Should -Be 'fresh'
+        $a.prompt   | Should -Be 'Please plan the next step in C:/p/x.md'
+        $a.setState | Should -BeNullOrEmpty
+    }
+
+    It "ready-to-implement, no sessions: fresh implement prompt" {
+        $a = getLaunchAction 'ready-to-implement' $false 'C:/p/x.md'
+
+        $a.kind   | Should -Be 'fresh'
+        $a.prompt | Should -Be 'Please do the next step in C:/p/x.md'
+    }
+
+    It "code-complete, no sessions: fresh review prompt" {
+        $a = getLaunchAction 'code-complete' $false 'C:/p/x.md'
+
+        $a.kind   | Should -Be 'fresh'
+        $a.prompt | Should -Match 'code-complete'
+        $a.prompt | Should -Match 'review'
+    }
+
+    It "missing or unknown state: treated as ready-to-plan" -TestCases @(
+        @{ State = $null }
+        @{ State = 'discussing' }
+    ) {
+        param($State)
+        (getLaunchAction $State $false 'C:/p/x.md').prompt | Should -Match 'plan the next step'
+    }
+
+    It "sessions present: resume, for each stored state except checkpointed" -TestCases @(
+        @{ State = 'ready-to-plan' }
+        @{ State = 'ready-to-implement' }
+        @{ State = 'code-complete' }
+    ) {
+        param($State)
+        (getLaunchAction $State $true 'C:/p/x.md').kind | Should -Be 'resume'
+    }
+
+    It "checkpointed: fresh implement launch + state flip, even with sessions" {
+        $a = getLaunchAction 'checkpointed' $true 'C:/p/x.md'
+
+        $a.kind     | Should -Be 'fresh'
+        $a.prompt   | Should -Be 'Please do the next step in C:/p/x.md'
+        $a.setState | Should -Be 'ready-to-implement'
+    }
+}
+
+Describe "getSessionInfos" {
+    BeforeAll {
+        $script:projRoot = ((New-Item -ItemType Directory "TestDrive:\cc-projects").FullName -replace '\\', '/').TrimEnd('/')
+        $null = New-Item -ItemType Directory "$script:projRoot/proj-a"
+        $null = New-Item -ItemType Directory "$script:projRoot/proj-b"
+        Set-Content "$script:projRoot/proj-a/sid-old.jsonl" '{}'
+        Set-Content "$script:projRoot/proj-a/sid-new.jsonl" '{}'
+        Set-Content "$script:projRoot/proj-a/sid-longfp.jsonl" '{}'
+        Set-Content "$script:projRoot/proj-b/sid-other.jsonl" '{}'
+        (Get-Item "$script:projRoot/proj-a/sid-old.jsonl").LastWriteTime    = Get-Date '2026-01-01'
+        (Get-Item "$script:projRoot/proj-a/sid-new.jsonl").LastWriteTime    = Get-Date '2026-06-01'
+        (Get-Item "$script:projRoot/proj-a/sid-longfp.jsonl").LastWriteTime = Get-Date '2025-12-01'
+        (Get-Item "$script:projRoot/proj-b/sid-other.jsonl").LastWriteTime  = Get-Date '2026-03-01'
+        @{version = 1; entries = @(
+            @{sessionId = 'sid-new'; summary = 'Newest session'; firstPrompt = 'fp-new'}
+            @{sessionId = 'sid-old'; firstPrompt = 'old first prompt'}
+            @{sessionId = 'sid-longfp'; firstPrompt = ('x' * 100)}
+        )} | ConvertTo-Json -Depth 5 | Set-Content "$script:projRoot/proj-a/sessions-index.json"
+    }
+
+    It "sorts most-recent-first by jsonl mtime, across project dirs" {
+        $infos = @(getSessionInfos @('sid-old', 'sid-other', 'sid-new') $script:projRoot)
+
+        @($infos.sid) | Should -Be @('sid-new', 'sid-other', 'sid-old')
+    }
+
+    It "excludes sids with no jsonl anywhere" {
+        $infos = @(getSessionInfos @('sid-new', 'sid-missing') $script:projRoot)
+
+        @($infos.sid) | Should -Be @('sid-new')
+    }
+
+    It "returns empty for an empty sid list" {
+        @(getSessionInfos @() $script:projRoot) | Should -HaveCount 0
+    }
+
+    It "uses the index summary when present" {
+        $infos = @(getSessionInfos @('sid-new') $script:projRoot)
+
+        $infos[0].summary | Should -Be 'Newest session'
+    }
+
+    It "falls back to firstPrompt when the index entry has no summary" {
+        $infos = @(getSessionInfos @('sid-old') $script:projRoot)
+
+        $infos[0].summary | Should -Be 'old first prompt'
+    }
+
+    It "truncates a long firstPrompt to 60 chars" {
+        $infos = @(getSessionInfos @('sid-longfp') $script:projRoot)
+
+        $infos[0].summary.Length | Should -Be 60
+        $infos[0].summary        | Should -Match '\.\.\.$'
+    }
+
+    It "falls back to the sid when the project dir has no index" {
+        $infos = @(getSessionInfos @('sid-other') $script:projRoot)
+
+        $infos[0].summary | Should -Be 'sid-other'
+    }
+
+    It "exposes the jsonl mtime as lastActive" {
+        $infos = @(getSessionInfos @('sid-new') $script:projRoot)
+
+        $infos[0].lastActive | Should -Be (Get-Date '2026-06-01')
     }
 }
 
@@ -702,12 +951,15 @@ Describe "getAvailablePlanFiles" {
         $null = New-Item -ItemType Directory "$script:plansDir/done"
         $null = New-Item -ItemType Directory "$script:plansDir/sub"
         $null = New-Item -ItemType Directory "$script:plansDir/sub/done"
-        Set-Content "$script:plansDir/active.md"          ""
-        Set-Content "$script:plansDir/sub/nested.md"      ""
-        Set-Content "$script:plansDir/done/archived.md"   ""
-        Set-Content "$script:plansDir/foo_done.md"        ""
-        Set-Content "$script:plansDir/sub/done/deep.md"   ""
-        Set-Content "$script:plansDir/sub/bar_done.md"    ""
+        Set-Content "$script:plansDir/active.md"             ""
+        Set-Content "$script:plansDir/sub/nested.md"         ""
+        Set-Content "$script:plansDir/done/archived.md"      ""
+        Set-Content "$script:plansDir/foo_done.md"           ""
+        Set-Content "$script:plansDir/sub/done/deep.md"      ""
+        Set-Content "$script:plansDir/sub/bar_done.md"       ""
+        Set-Content "$script:plansDir/foo_ref.md"            ""
+        Set-Content "$script:plansDir/foo_background.md"     ""
+        Set-Content "$script:plansDir/sub/baz_background.md" ""
     }
 
     It "returns top-level and nested .md files" {
@@ -729,6 +981,14 @@ Describe "getAvailablePlanFiles" {
         $names = $result | ForEach-Object { Split-Path $_ -Leaf }
         $names | Should -Not -Contain 'foo_done.md'
         $names | Should -Not -Contain 'bar_done.md'
+    }
+
+    It "excludes companion files (_ref / _background)" {
+        $result = getAvailablePlanFiles $script:plansDir
+        $names = $result | ForEach-Object { Split-Path $_ -Leaf }
+        $names | Should -Not -Contain 'foo_ref.md'
+        $names | Should -Not -Contain 'foo_background.md'
+        $names | Should -Not -Contain 'baz_background.md'
     }
 }
 
@@ -765,103 +1025,28 @@ Describe "getPlanTitle" {
     }
 }
 
-Describe "writeLaunchIntent" {
-    It "writes planFile and default role dir as cwd when no project" {
-        function Get-PratProject { param($Location) $null }
-        function Test-Path { param($Path) $true }
-        $runningDir = (New-Item "TestDrive:/running-wi1" -ItemType Directory).FullName
-        writeLaunchIntent "C:/plans/foo.md" "C:/some/project"
-        $json = Get-Content "$runningDir/launch_intent.json" -Raw | ConvertFrom-Json
-        $json.planFile | Should -Be "C:/plans/foo.md"
-        $json.cwd      | Should -BeLike "*/agentRoles/default"
-    }
-
-    It "uses role-specific dir as cwd when project has agentRole" {
-        function Get-PratProject { param($Location) @{ agentRole = 'myrole' } }
-        function Test-Path { param($Path) $true }
-        $runningDir = (New-Item "TestDrive:/running-wi2" -ItemType Directory).FullName
-        writeLaunchIntent "C:/plans/foo.md" "C:/repo"
-        $json = Get-Content "$runningDir/launch_intent.json" -Raw | ConvertFrom-Json
-        $json.cwd | Should -BeLike "*/agentRoles/myrole"
-    }
-
-    It "uses default role dir when project has no agentRole" {
-        function Get-PratProject { param($Location) @{ root = 'C:/repo' } }
-        function Test-Path { param($Path) $true }
-        $runningDir = (New-Item "TestDrive:/running-wi3" -ItemType Directory).FullName
-        writeLaunchIntent "C:/plans/foo.md" "C:/repo"
-        $json = Get-Content "$runningDir/launch_intent.json" -Raw | ConvertFrom-Json
-        $json.cwd | Should -BeLike "*/agentRoles/default"
-    }
-
-    It "cwd uses forward slashes" {
-        function Get-PratProject { param($Location) $null }
-        function Test-Path { param($Path) $true }
-        $runningDir = (New-Item "TestDrive:/running-wi4" -ItemType Directory).FullName
-        writeLaunchIntent "C:/plans/foo.md" "C:/some/project"
-        $json = Get-Content "$runningDir/launch_intent.json" -Raw | ConvertFrom-Json
-        $json.cwd | Should -Not -Match '\\'
-    }
-}
-
-Describe "pickSessionId" {
-    BeforeEach {
-        Mock Write-Host { }
-        Mock Read-Host { "" }
-    }
-
-    It "returns null when sessionIds is empty" {
-        $entry = [pscustomobject]@{sessionIds = @()}
-
-        pickSessionId $entry | Should -BeNull
-    }
-
-    It "returns the single ID without prompting" {
-        $entry = [pscustomobject]@{sessionIds = @("sid-abc")}
-
-        pickSessionId $entry | Should -Be "sid-abc"
-        Should -Invoke Read-Host -Times 0
-    }
-
-    It "returns the chosen ID for valid multi-session input" {
-        $entry = [pscustomobject]@{sessionIds = @("sid-0", "sid-1")}
-        Mock Read-Host { "1" }
-
-        pickSessionId $entry | Should -Be "sid-1"
-    }
-
-    It "re-prompts on non-integer input, then returns correct ID" {
-        $entry = [pscustomobject]@{sessionIds = @("sid-0", "sid-1")}
-        $script:pickCallCount = 0
-        Mock Read-Host { if ($script:pickCallCount++ -eq 0) { "abc" } else { "0" } }
-
-        pickSessionId $entry | Should -Be "sid-0"
-        Should -Invoke Read-Host -Times 2
-    }
-
-    It "re-prompts on out-of-range integer, then returns correct ID" {
-        $entry = [pscustomobject]@{sessionIds = @("sid-0", "sid-1")}
-        $script:pickCallCount = 0
-        Mock Read-Host { if ($script:pickCallCount++ -eq 0) { "5" } else { "1" } }
-
-        pickSessionId $entry | Should -Be "sid-1"
-        Should -Invoke Read-Host -Times 2
-    }
-}
-
 Describe "openUntracked" {
+    BeforeAll {
+        $script:untrackedRoot = ((New-Item -ItemType Directory "TestDrive:\plans-untracked").FullName -replace '\\', '/').TrimEnd('/')
+
+        function newUntrackedPlan([string] $name, [string] $state) {
+            $path = "$script:untrackedRoot/$name.md"
+            Set-Content $path @("# $name", "", "## Step 1: first")
+            if ($state) { $null = Set-PlanState -PlanFile $path -State $state }
+            return $path
+        }
+    }
+
     BeforeEach {
         Mock saveDb { }
         Mock Write-Host { }
         Mock Read-Host { "" }
-        Mock launchCl { return 0 }
         Mock clearConsole { }
-        Mock getPlansDir { return "C:/plans" }
-        Mock getAvailablePlanFiles { return @("C:/plans/foo.md") }
+        Mock getPlansDir { return $script:untrackedRoot }
+        Mock getSessionInfos { @() }
         Mock pickFromList { return 0 }
-        Mock readStateKey { return [pscustomobject]@{Key = 'D'} }
-        Mock writeLaunchIntent { }
-        Mock clearLaunchIntent { }
+        $script:launched = $null
+        Mock launchCl { $script:launched = @{cwd = $cwd; planFile = $planFile; rest = @($args)}; return 0 }
     }
 
     It "returns false when no plans directory configured" {
@@ -875,9 +1060,10 @@ Describe "openUntracked" {
     }
 
     It "returns false when no untracked plans remain" {
+        $plan  = newUntrackedPlan 'only' $null
+        Mock getAvailablePlanFiles { return @($plan) }
         $db    = [System.Collections.Generic.List[object]]::new()
-        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
-        $db.Add($entry)
+        $db.Add([pscustomobject]@{planFile = $plan; cwd = "C:/de"; sessionIds = @()})
 
         $result = openUntracked $db
 
@@ -886,6 +1072,7 @@ Describe "openUntracked" {
     }
 
     It "returns false when user cancels plan selection" {
+        Mock getAvailablePlanFiles { return @(newUntrackedPlan 'cancel' $null) }
         $db = [System.Collections.Generic.List[object]]::new()
         Mock pickFromList { return $null }
 
@@ -895,124 +1082,99 @@ Describe "openUntracked" {
         Should -Invoke launchCl -Times 0
     }
 
-    It "discussing state: adds entry with correct state, clears console, launches, returns true" {
+    It "does not prompt for an initial state" {
+        Mock getAvailablePlanFiles { return @(newUntrackedPlan 'noprompt' $null) }
+        Mock readStateKey { throw 'state prompt should be gone' }
+        $db = [System.Collections.Generic.List[object]]::new()
+
+        { openUntracked $db } | Should -Not -Throw
+    }
+
+    It "adds a stateless entry and dispatches a frontmatterless plan as ready-to-plan" {
+        $plan = newUntrackedPlan 'fresh' $null
+        Mock getAvailablePlanFiles { return @($plan) }
         $db = [System.Collections.Generic.List[object]]::new()
 
         $result = openUntracked $db
 
         $result         | Should -BeTrue
         $db.Count       | Should -Be 1
-        $db[0].state    | Should -Be "discussing"
-        $db[0].planFile | Should -Be "C:/plans/foo.md"
-        Should -Invoke clearConsole -Times 1
-        Should -Invoke launchCl    -Times 1
-        Should -Invoke saveDb      -Times 1
+        $db[0].planFile | Should -Be $plan
+        $script:launched.rest[0] | Should -Be "Please plan the next step in $plan"
+        Should -Invoke saveDb -Times 1
     }
 
-    It "ready state: transitions to in-progress, launches, returns true" {
+    It "dispatches a ready-to-implement plan with the do-next-step prompt" {
+        $plan = newUntrackedPlan 'rti' 'ready-to-implement'
+        Mock getAvailablePlanFiles { return @($plan) }
         $db = [System.Collections.Generic.List[object]]::new()
-        Mock readStateKey { return [pscustomobject]@{Key = 'R'} }
 
         $result = openUntracked $db
 
-        $result      | Should -BeTrue
-        $db[0].state | Should -Be "in-progress"
-        Should -Invoke launchCl -Times 1
+        $result | Should -BeTrue
+        $script:launched.rest[0] | Should -Be "Please do the next step in $plan"
     }
 
-    It "returns false when cl fails" {
-        $db = [System.Collections.Generic.List[object]]::new()
+    It "returns true even when cl fails (TUI refreshes)" {
+        Mock getAvailablePlanFiles { return @(newUntrackedPlan 'clfail' $null) }
         Mock launchCl { return 1 }
+        $db = [System.Collections.Generic.List[object]]::new()
 
         $result = openUntracked $db
 
-        $result | Should -BeFalse
-    }
-
-    It "discussing state: writes and clears launch intent when launching" {
-        $db = [System.Collections.Generic.List[object]]::new()
-
-        openUntracked $db
-
-        Should -Invoke writeLaunchIntent -Times 1
-        Should -Invoke clearLaunchIntent -Times 1
-    }
-
-    It "ready state: writes and clears launch intent when launching" {
-        $db = [System.Collections.Generic.List[object]]::new()
-        Mock readStateKey { return [pscustomobject]@{Key = 'R'} }
-
-        openUntracked $db
-
-        Should -Invoke writeLaunchIntent -Times 1
-        Should -Invoke clearLaunchIntent -Times 1
+        $result | Should -BeTrue
     }
 }
 
 Describe "changeState" {
+    BeforeAll {
+        $script:statePlansRoot = ((New-Item -ItemType Directory "TestDrive:\plans-state").FullName -replace '\\', '/').TrimEnd('/')
+
+        function newStatePlan([string] $name, [string] $state) {
+            $path = "$script:statePlansRoot/$name.md"
+            Set-Content $path @("# $name", "", "## Step 1: first")
+            if ($state) { $null = Set-PlanState -PlanFile $path -State $state }
+            return $path
+        }
+    }
+
     BeforeEach {
         Mock saveDb { }
         Mock Write-Host { }
         Mock clearConsole { }
     }
 
-    It "D key: sets state to discussing and saves" {
+    It "writes the picked state to the plan file, not the db" -TestCases @(
+        @{ Key = 'P'; Expected = 'ready-to-plan';      Initial = 'code-complete' }
+        @{ Key = 'I'; Expected = 'ready-to-implement'; Initial = 'ready-to-plan' }
+        @{ Key = 'C'; Expected = 'code-complete';      Initial = 'ready-to-plan' }
+        @{ Key = 'K'; Expected = 'checkpointed';       Initial = 'ready-to-plan' }
+    ) {
+        param($Key, $Expected, $Initial)
+        $plan  = newStatePlan "key-$Key" $Initial
+        $entry = [pscustomobject]@{planFile = $plan; cwd = "C:/de"; sessionIds = @(); state = $Initial}
         $db    = [System.Collections.Generic.List[object]]::new()
-        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "in-progress"; cwd = "C:/de"; sessionIds = @()}
         $db.Add($entry)
-        Mock readStateKey { return [pscustomobject]@{Key = 'D'} }
+        $script:pickKey = $Key
+        Mock readStateKey { return [pscustomobject]@{Key = $script:pickKey} }
 
         changeState $db $entry
 
-        $entry.state | Should -Be "discussing"
-        Should -Invoke saveDb -Times 1
-    }
-
-    It "I key: sets state to in-progress and saves" {
-        $db    = [System.Collections.Generic.List[object]]::new()
-        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
-        $db.Add($entry)
-        Mock readStateKey { return [pscustomobject]@{Key = 'I'} }
-
-        changeState $db $entry
-
-        $entry.state | Should -Be "in-progress"
-        Should -Invoke saveDb -Times 1
-    }
-
-    It "R key: sets state to ready and saves" {
-        $db    = [System.Collections.Generic.List[object]]::new()
-        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
-        $db.Add($entry)
-        Mock readStateKey { return [pscustomobject]@{Key = 'R'} }
-
-        changeState $db $entry
-
-        $entry.state | Should -Be "ready"
-        Should -Invoke saveDb -Times 1
-    }
-
-    It "does not save when the same state is selected" {
-        $db    = [System.Collections.Generic.List[object]]::new()
-        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "in-progress"; cwd = "C:/de"; sessionIds = @()}
-        $db.Add($entry)
-        Mock readStateKey { return [pscustomobject]@{Key = 'I'} }
-
-        changeState $db $entry
-
-        $entry.state | Should -Be "in-progress"
+        (Get-PlanState -PlanFile $plan).State | Should -Be $Expected
+        $entry.state                          | Should -Be $Expected
         Should -Invoke saveDb -Times 0
     }
 
-    It "does not change state or save when an unrecognized key is pressed" {
+    It "leaves the plan file unchanged on an unrecognized key" {
+        $plan  = newStatePlan 'esc' 'ready-to-plan'
+        $entry = [pscustomobject]@{planFile = $plan; cwd = "C:/de"; sessionIds = @(); state = 'ready-to-plan'}
         $db    = [System.Collections.Generic.List[object]]::new()
-        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
         $db.Add($entry)
         Mock readStateKey { return [pscustomobject]@{Key = 'Escape'} }
 
         changeState $db $entry
 
-        $entry.state | Should -Be "discussing"
+        (Get-PlanState -PlanFile $plan).State | Should -Be 'ready-to-plan'
         Should -Invoke saveDb -Times 0
     }
 }
