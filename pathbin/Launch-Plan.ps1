@@ -339,7 +339,7 @@ function launchCl([string] $harness, [string] $cwd, [string] $planFile) {
     # joins -ArgumentList with spaces without re-quoting, so inner quotes are stripped by argv
     # parsing before pwsh reassembles them for -Command. Base64 has no special characters.
     $clArgs   = getClExtraArgs $harness $args
-    $argStr   = ($clArgs | ForEach-Object { '"' + ($_ -replace '"', '""') + '"' }) -join ' '
+    $argStr   = ($clArgs | ForEach-Object { if ($_.StartsWith('-')) { $_ } else {'"' + ($_ -replace '"', '""') + '"' }}) -join ' '
     $cmd      = if ($argStr) { "& cl $argStr" } else { '& cl' }
     $encoded  = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd))
     $spParams = @{ FilePath = 'pwsh'; ArgumentList = @('-NoLogo', '-EncodedCommand', $encoded); NoNewWindow = $true; PassThru = $true }
@@ -662,12 +662,10 @@ function resolveCopilotSessions($entries, $records, $liveSessionIds, $orphans, $
     }
 }
 
-# `cl` defaults to copilot; `-CC` selects claude. Prepend it for claude launches.
 # The leading comma on each return prevents PowerShell from unrolling a single-element array to a
 # bare scalar, which would later splat as individual characters.
 function getClExtraArgs([string] $harness, $userArgs) {
-    if ($harness -eq 'claude') { return ,(@('-CC') + @($userArgs)) }
-    return ,@($userArgs)
+    return ,(@("-Harness:$harness") + @($userArgs)) 
 }
 
 # Resume flag differs by harness: claude wants `--resume <id>` (two tokens), copilot `--resume=<id>`.
