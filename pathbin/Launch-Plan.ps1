@@ -462,7 +462,7 @@ function openUntracked($db) {
         planFile   = $planFile
         cwd        = normalizePath $PWD.Path
         sessionIds = @()
-        harness    = 'copilot'
+        harness    = Get-DefaultHarness
     }
     $db.Add($entry)
 
@@ -480,7 +480,7 @@ function registerProject($db, $orphans, $liveSessionIds, $sessionHarness = @{}) 
     $sidIdx = pickFromList $orphans { param($s) $s } 'Register — pick session'
     if ($null -eq $sidIdx) { return }
     $sid = $orphans[$sidIdx]
-    $harness = if ($sessionHarness -and $sessionHarness[$sid]) { $sessionHarness[$sid] } else { 'claude' }
+    $harness = if ($sessionHarness -and $sessionHarness[$sid]) { $sessionHarness[$sid] } else { Get-DefaultHarness }
 
     # Build plan list: tracked entries + untracked from plansDir
     $trackedPaths = @($db | ForEach-Object { $_.planFile })
@@ -561,7 +561,7 @@ function loadDb([string] $path) {
             planFile   = $_.planFile
             cwd        = $_.cwd
             sessionIds = @($_.sessionIds | Where-Object { $_ })
-            harness    = if ($_.harness) { $_.harness } else { 'claude' }
+            harness    = if ($_.harness) { $_.harness } else { Get-DefaultHarness }
         }
     })
 }
@@ -574,7 +574,7 @@ function saveDb($db, [string] $path) {
             planFile = $_.planFile
             cwd      = $_.cwd
             sessionIds = @($_.sessionIds)
-            harness  = if ($_.harness) { $_.harness } else { 'claude' }
+            harness  = if ($_.harness) { $_.harness } else { Get-DefaultHarness }
         }
     })
     (ConvertTo-Json -InputObject $persisted -Depth 5) | Set-Content $path -Encoding UTF8
