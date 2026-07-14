@@ -1,5 +1,5 @@
 # Launch-Plan.ps1  (alias: pl)
-# Interactive launcher for plan-based Claude sessions.
+# Interactive launcher for plan-based agent sessions (Claude Code and GitHub Copilot).
 # Plan lifecycle state lives in plan-file frontmatter (Get-PlanState/Set-PlanState); the local db
 # only associates plans with sessions and a cwd. Enter is state-driven; after a session exits, pl
 # returns to its TUI with freshly resolved state.
@@ -20,7 +20,7 @@ function main {
     $lastPlan = $null
     while ($true) {
         $ctx = buildLauncherContext
-        $lastPlan = runLauncher $ctx.db $ctx.liveSessionIds $ctx.orphans $ctx.crossFlags $ctx.notices $lastPlan
+        $lastPlan = runLauncher $ctx.db $ctx.liveSessionIds $ctx.orphans $ctx.crossFlags $ctx.notices $ctx.sessionHarness $lastPlan
         if (-not $lastPlan) { return }
     }
 }
@@ -29,6 +29,14 @@ function buildLauncherContext {
     $db = loadLauncherDb $dbPath
     $livePids = getLiveClaudePids
     $resolved = resolveSessionIds $db $runningDir $livePids
+
+    # Copilot detection unions into the same live/orphan sets. Claude orphans default to 'claude';
+    # resolveCopilotSessions records 'copilot' for the sessions it resolves.
+    $sessionHarness = @{}
+    foreach ($sid in $resolved.orphans) { $sessionHarness[$sid] = 'claude' }
+    $copilotRecords = getLiveCopilotRecords
+    resolveCopilotSessions $db $copilotRecords $resolved.liveSessionIds $resolved.orphans $sessionHarness
+
     saveDb $db $dbPath
     cleanStaleRunningFiles $runningDir $livePids
     attachEntryInfo $db
@@ -47,7 +55,7 @@ function buildLauncherContext {
         $crossFlags = getCrossMachineFlags $syncPath
     }
 
-    return @{ db = $db; liveSessionIds = $resolved.liveSessionIds; orphans = $resolved.orphans; crossFlags = $crossFlags; notices = $notices }
+    return @{ db = $db; liveSessionIds = $resolved.liveSessionIds; orphans = $resolved.orphans; crossFlags = $crossFlags; notices = $notices; sessionHarness = $sessionHarness }
 }
 
 function loadLauncherDb([string] $path) {
@@ -75,7 +83,7 @@ function updateEntryInfo($entry) {
 
 # Returns the launched plan's planFile after a cl launch (the caller rebuilds context and
 # re-enters, restoring the selection), or $null on quit.
-function runLauncher($db, $liveSessionIds, $orphans, $crossFlags, $notices, $initialPlanFile) {
+function runLauncher($db, $liveSessionIds, $orphans, $crossFlags, $notices, $sessionHarness, $initialPlanFile) {
     $selected      = indexOfPlan $db $initialPlanFile
     $transientError = $null
     while ($true) {
@@ -97,12 +105,12 @@ function runLauncher($db, $liveSessionIds, $orphans, $crossFlags, $notices, $ini
             }
             { $_ -in 'R', 'r' } {
                 [Console]::Clear()
-                registerProject $db $orphans $liveSessionIds
+                registerProject $db $orphans $liveSessionIds $sessionHarness
             }
             { $_ -in 'S', 's' } {
                 if ($db.Count -gt 0) {
                     if (isLive $db[$selected] $liveSessionIds) {
-                        $transientError = 'Cannot change state of a live session — exit Claude first.'
+                        $transientError = 'Cannot change state of a live session — exit the agent first.'
                     } else {
                         changeState $db $db[$selected]
                     }
@@ -111,7 +119,7 @@ function runLauncher($db, $liveSessionIds, $orphans, $crossFlags, $notices, $ini
             { $_ -in 'U', 'u' } {
                 if ($db.Count -gt 0) {
                     if (isLive $db[$selected] $liveSessionIds) {
-                        $transientError = 'Cannot unregister a live session — exit Claude first.'
+                        $transientError = 'Cannot unregister a live session — exit the agent first.'
                     } else {
                         $db.RemoveAt($selected)
                         saveDb $db $dbPath
@@ -226,7 +234,7 @@ function getLaunchAction([string] $state, [bool] $hasResumableSessions, [string]
 
 function openProject($db, $entry, $liveSessionIds) {
     if (isLive $entry $liveSessionIds) {
-        Write-Host 'A Claude session is already live for this plan — switch to it instead.' -ForegroundColor Yellow
+        Write-Host 'A session is already live for this plan — switch to it instead.' -ForegroundColor Yellow
         $null = Read-Host 'Press Enter to return'
         return $false
     }
@@ -250,9 +258,12 @@ function openProject($db, $entry, $liveSessionIds) {
 
         if ($rows[$idx].kind -eq 'session') {
             $picked = $rows[$idx].info
-            $script:launchPrewriteSid = $picked.sid
-            $script:launchPrewriteCwd = normalizePath $entry.cwd
-            $exitCode = launchCl $entry.cwd $entry.planFile --resume $picked.sid
+            if ($entry.harness -eq 'claude') {
+                $script:launchPrewriteSid = $picked.sid
+                $script:launchPrewriteCwd = normalizePath $entry.cwd
+            }
+            $resumeArgs = getResumeArgs $entry.harness $picked.sid
+            $exitCode = launchCl $entry.harness $entry.cwd $entry.planFile @resumeArgs
             if ($exitCode -ne 0) {
                 $entry.sessionIds = @($entry.sessionIds | Where-Object { $_ -ne $picked.sid })
                 saveDb $db $dbPath
@@ -267,7 +278,7 @@ function openProject($db, $entry, $liveSessionIds) {
 
     $entry.cwd = normalizePath $PWD.Path
     saveDb $db $dbPath
-    $exitCode = launchCl $entry.cwd $entry.planFile $action.prompt
+    $exitCode = launchCl $entry.harness $entry.cwd $entry.planFile $action.prompt
     showLaunchError $exitCode
     return $true
 }
@@ -320,14 +331,15 @@ function resetConsoleMode {
 $script:launchPrewriteSid = $null  # set before resume launches to pre-write the running file
 $script:launchPrewriteCwd = $null
 
-function launchCl([string] $cwd, [string] $planFile) {
+function launchCl([string] $harness, [string] $cwd, [string] $planFile) {
     resetConsoleMode
     # Use Start-Process -NoNewWindow so the child process inherits the console directly,
     # bypassing PowerShell's pipeline stdout/stderr capture which breaks interactive TUI apps.
     # Use -EncodedCommand (Base64) to avoid Windows command-line quoting issues: Start-Process
     # joins -ArgumentList with spaces without re-quoting, so inner quotes are stripped by argv
     # parsing before pwsh reassembles them for -Command. Base64 has no special characters.
-    $argStr   = ($args | ForEach-Object { '"' + ($_ -replace '"', '""') + '"' }) -join ' '
+    $clArgs   = getClExtraArgs $harness $args
+    $argStr   = ($clArgs | ForEach-Object { '"' + ($_ -replace '"', '""') + '"' }) -join ' '
     $cmd      = if ($argStr) { "& cl $argStr" } else { '& cl' }
     $encoded  = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd))
     $spParams = @{ FilePath = 'pwsh'; ArgumentList = @('-NoLogo', '-EncodedCommand', $encoded); NoNewWindow = $true; PassThru = $true }
@@ -338,8 +350,9 @@ function launchCl([string] $cwd, [string] $planFile) {
     try {
         $proc = Start-Process @spParams
         # Pre-write the running file so the session shows live immediately, before the first
-        # UserPromptSubmit hook fires. Only done for resume launches where the sid is known.
-        if ($script:launchPrewriteSid) {
+        # UserPromptSubmit hook fires. Only for claude resume launches (the running-file mechanism
+        # is claude-only; copilot detection reads the live command line directly).
+        if ($harness -eq 'claude' -and $script:launchPrewriteSid) {
             $runDir = "$home/prat/auto/context/running"
             $null = New-Item -ItemType Directory $runDir -Force
             [pscustomobject]@{session_id = $script:launchPrewriteSid; cwd = $script:launchPrewriteCwd} |
@@ -449,6 +462,7 @@ function openUntracked($db) {
         planFile   = $planFile
         cwd        = normalizePath $PWD.Path
         sessionIds = @()
+        harness    = 'copilot'
     }
     $db.Add($entry)
 
@@ -456,7 +470,7 @@ function openUntracked($db) {
     return openProject $db $entry @()
 }
 
-function registerProject($db, $orphans, $liveSessionIds) {
+function registerProject($db, $orphans, $liveSessionIds, $sessionHarness = @{}) {
     if ($orphans.Count -eq 0) {
         Write-Host 'No unregistered sessions.' -ForegroundColor Yellow
         $null = Read-Host 'Press Enter to return'
@@ -466,6 +480,7 @@ function registerProject($db, $orphans, $liveSessionIds) {
     $sidIdx = pickFromList $orphans { param($s) $s } 'Register — pick session'
     if ($null -eq $sidIdx) { return }
     $sid = $orphans[$sidIdx]
+    $harness = if ($sessionHarness -and $sessionHarness[$sid]) { $sessionHarness[$sid] } else { 'claude' }
 
     # Build plan list: tracked entries + untracked from plansDir
     $trackedPaths = @($db | ForEach-Object { $_.planFile })
@@ -494,9 +509,12 @@ function registerProject($db, $orphans, $liveSessionIds) {
             planFile   = $planFile
             cwd        = normalizePath $PWD.Path
             sessionIds = @()
+            harness    = $harness
         }
         $entry | Add-Member -NotePropertyName state -NotePropertyValue (Get-PlanState -PlanFile $planFile).State
         $db.Add($entry)
+    } else {
+        $entry | Add-Member -NotePropertyName harness -NotePropertyValue $harness -Force
     }
 
     if ($sid -notin $entry.sessionIds) {
@@ -543,6 +561,7 @@ function loadDb([string] $path) {
             planFile   = $_.planFile
             cwd        = $_.cwd
             sessionIds = @($_.sessionIds | Where-Object { $_ })
+            harness    = if ($_.harness) { $_.harness } else { 'claude' }
         }
     })
 }
@@ -551,7 +570,12 @@ function saveDb($db, [string] $path) {
     $null = New-Item -ItemType Directory -Path (Split-Path $path) -Force
     # Project to the persisted fields — in-memory entries also carry a computed state property.
     $persisted = @($db | ForEach-Object {
-        [pscustomobject]@{ planFile = $_.planFile; cwd = $_.cwd; sessionIds = @($_.sessionIds) }
+        [pscustomobject]@{
+            planFile = $_.planFile
+            cwd      = $_.cwd
+            sessionIds = @($_.sessionIds)
+            harness  = if ($_.harness) { $_.harness } else { 'claude' }
+        }
     })
     (ConvertTo-Json -InputObject $persisted -Depth 5) | Set-Content $path -Encoding UTF8
 }
@@ -562,6 +586,94 @@ function getLiveClaudePids {
     $procs = Get-Process claude -ErrorAction SilentlyContinue
     if (-not $procs) { return ,@() }
     return ,@($procs | Select-Object -ExpandProperty Id | Where-Object { $_ -is [int] })
+}
+
+# Thin wrapper (mockable in tests) over the copilot.exe process query.
+function getCopilotProcs {
+    Get-CimInstance Win32_Process -Filter "Name='copilot.exe'" -ErrorAction SilentlyContinue |
+        ForEach-Object { [pscustomobject]@{ CommandLine = $_.CommandLine } }
+}
+
+# Copilot needs no hook: the session id and cwd are already on the copilot.exe command line.
+# Fresh sessions carry `--session-id <uuid>` and `-C <cwd>`; resumed sessions carry `--resume=<uuid>`
+# and no `-C`. Each session spawns two processes (parent + fork) with the same id, so dedup by id.
+function getLiveCopilotRecords {
+    $sidRx = '--(?:session-id|resume)[ =]([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})'
+    $cwdRx = '\s-C\s+(\S+)'
+    $seen    = @{}
+    $records = [System.Collections.Generic.List[object]]::new()
+    foreach ($proc in (getCopilotProcs)) {
+        $cl = $proc.CommandLine
+        if (-not $cl) { continue }
+        $m = [regex]::Match($cl, $sidRx)
+        if (-not $m.Success) { continue }
+        $sid = $m.Groups[1].Value
+        if ($seen.ContainsKey($sid)) { continue }
+        $seen[$sid] = $true
+        $cwd = $null
+        $cm = [regex]::Match($cl, $cwdRx)
+        if ($cm.Success) { $cwd = $cm.Groups[1].Value }
+        $records.Add(@{ session_id = $sid; cwd = $cwd })
+    }
+    return ,@($records)
+}
+
+# Mirrors resolveSessionIds for Copilot: match records to entries by id, then by cwd, unioning into
+# the shared liveSessionIds/orphans. Stamps the matched entry's harness and records it in
+# $sessionHarness (session_id -> 'copilot') so launch/resume pick the right harness later.
+function resolveCopilotSessions($entries, $records, $liveSessionIds, $orphans, $sessionHarness) {
+    $sidMap = @{}
+    foreach ($entry in $entries) {
+        foreach ($sid in $entry.sessionIds) { $sidMap[$sid] = $entry }
+    }
+
+    $unmatched = [System.Collections.Generic.List[object]]::new()
+
+    # Pass 1: sessions already tracked in the db by id.
+    foreach ($rec in $records) {
+        $sid = $rec.session_id
+        if (-not $sid) { continue }
+        if ($sidMap.ContainsKey($sid)) {
+            $null = $liveSessionIds.Add($sid)
+            $sidMap[$sid].harness   = 'copilot'
+            $sessionHarness[$sid]   = 'copilot'
+        } else {
+            $unmatched.Add($rec)
+        }
+    }
+
+    # Pass 2: cwd-match new sessions to a sole unoccupied entry; otherwise orphan.
+    foreach ($rec in $unmatched) {
+        $sid      = $rec.session_id
+        $cwdEntry = $null
+        if ($rec.cwd) {
+            $fileCwd    = normalizePath $rec.cwd
+            $cwdMatches = @($entries | Where-Object { (normalizePath $_.cwd) -eq $fileCwd -and -not (isLive $_ $liveSessionIds) })
+            if ($cwdMatches.Count -eq 1) { $cwdEntry = $cwdMatches[0] }
+        }
+        if ($cwdEntry) {
+            $cwdEntry.sessionIds = @($cwdEntry.sessionIds) + @($sid)
+            $cwdEntry.harness    = 'copilot'
+        } else {
+            $orphans.Add($sid) | Out-Null
+        }
+        $sessionHarness[$sid] = 'copilot'
+        $null = $liveSessionIds.Add($sid)
+    }
+}
+
+# `cl` defaults to copilot; `-CC` selects claude. Prepend it for claude launches.
+# The leading comma on each return prevents PowerShell from unrolling a single-element array to a
+# bare scalar, which would later splat as individual characters.
+function getClExtraArgs([string] $harness, $userArgs) {
+    if ($harness -eq 'claude') { return ,(@('-CC') + @($userArgs)) }
+    return ,@($userArgs)
+}
+
+# Resume flag differs by harness: claude wants `--resume <id>` (two tokens), copilot `--resume=<id>`.
+function getResumeArgs([string] $harness, [string] $sid) {
+    if ($harness -eq 'claude') { return ,@('--resume', $sid) }
+    return ,@("--resume=$sid")
 }
 
 function resolveSessionIds($entries, [string] $rDir, $livePids) {
