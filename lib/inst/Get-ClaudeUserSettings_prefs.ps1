@@ -4,6 +4,7 @@ $home_fwd   = ($home -replace '\\', '/').TrimEnd('/')
 $home_bash = $home_fwd -replace '^C:', '//c'
 
 return @{
+    defaultShell       = "powershell"
     spinnerVerbs       = @{mode = "replace"; verbs = @("Working")}
     spinnerTipsEnabled = $false
     ui                 = @{showStartupTips = $false}
