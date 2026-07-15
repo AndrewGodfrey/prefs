@@ -195,7 +195,7 @@ exhaustive options) are still fine as AskUserQuestion.
 - Markdown files: 
   - wrap lines at 120 characters max. Break at natural phrase boundaries
     for readability (like this).
-  - On wide tables, prepend them with `<!-- prettier-ignore -->`. Stops prettier from reflowing
+  - On wide tables in Markdown files, prepend them with `<!-- prettier-ignore -->`. Stops prettier from reflowing
     them into less-readable shapes. Table rows and fenced code blocks are exempt from the 120
     limit — they can't be wrapped, and the checker deliberately skips them.
   - A PostToolUse hook flags over-limit lines after every edit — heed its findings. For bulk
