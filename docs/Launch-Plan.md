@@ -62,10 +62,14 @@ the db, unshown.
 Default selection: `ready-to-plan` with sessions defaults to the fresh row (post-wrap planning usually
 wants a fresh session); every other resumable state defaults to the most-recent session row.
 
-- **Resume**: pl pre-writes the running file with the picked session id immediately after launch, so the
-  session shows `[live]` before the first prompt hook fires (claude only). If `cl` exits nonzero, just the
-  failed session id is dropped from the entry — the plan stays tracked.
+- **Resume**: the picked session's id rides `--resume`/`--resume=` on `cl`'s command line, so any pl
+  instance's next command-line scan (see Live-session detection below) sees it live immediately — no
+  hook or pre-write needed. If `cl` exits nonzero, just the failed session id is dropped from the entry —
+  the plan stays tracked.
 - **Fresh**: the entry's cwd is refreshed to the current directory and the state's prompt is passed to `cl`.
+  For claude, pl also generates a session id and passes it via `--session-id`, appending it to the entry's
+  `sessionIds` immediately (`getFreshSessionArgs`) — claude's own command line carries nothing else
+  identifying, so this is what makes the session detectable at all.
 
 ### Model picker (fresh row)
 
@@ -116,8 +120,6 @@ relies on this: deleting the plan file is how a finished plan leaves the launche
 Every launch, fresh and resume, wraps `cl` with `Set-EnvTemp @{ CL_PLAN_FILE = <planFile> }` (`launchCl`).
 Consumers:
 
-- the `UserPromptSubmit` hook — stamps `planFile` into the session's running file on every prompt, which
-  lets pl re-associate sessions with plans by more than cwd;
 - the statusline — shows the active plan;
 - skills' "the active plan" default.
 
@@ -129,13 +131,18 @@ quit CC → land in pl → Enter resumes.
 
 ## Live-session detection
 
-- **Claude**: a `UserPromptSubmit` hook writes `~/prat/auto/context/running/pid_<pid>.txt` containing
-  `{session_id, cwd, planFile}`. On startup pl keeps only files whose pid is a live `claude` process, then
-  matches by session id, then by the stamped planFile; anything left is an orphan (`R` is the repair).
-  Running files for dead pids are cleaned up.
-- **Copilot**: no hook needed — session id and cwd are parsed from live `copilot.exe` command lines
-  (`--session-id`/`--resume`, `-C`). Unmatched sessions are cwd-matched to a sole unoccupied entry, else
-  orphaned.
+No hook: both harnesses carry their session id on their own live process command line, so pl scans
+`claude.exe`/`copilot.exe` command lines directly (`getLiveSessionRecords`, one call per harness) and
+resolves them against the db (`resolveHarnessSessions`) — id match first, then (copilot only) a cwd-match
+fallback to a sole unoccupied entry. Anything left unmatched is an orphan (`R` is the repair).
+
+- **Claude**: `--session-id <uuid>` (fresh, added by pl — see Resume/Fresh above) or `--resume <sid>`
+  (resume). No cwd appears on the command line, and pl-launched claude sessions don't need cwd-matching —
+  bare `cl` launches without pl always get a generated `--session-id` too (`Invoke-ClHook` in de's
+  `Start-CommandLineAgent.ps1`), so every claude session is at least discoverable as an orphan.
+- **Copilot**: session id and cwd are parsed from live `copilot.exe` command lines (`--session-id`/
+  `--resume`, `-C`) — copilot's own launcher supplies these unprompted, no pl involvement needed. Unmatched
+  sessions are cwd-matched to a sole unoccupied entry, else orphaned.
 
 ## Cross-machine visibility
 

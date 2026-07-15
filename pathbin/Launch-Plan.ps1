@@ -8,8 +8,7 @@
 
 param([switch] $NoSyncBackedWarning)
 
-$dbPath     = "$home/prat/auto/context/db.json"
-$runningDir = "$home/prat/auto/context/running"
+$dbPath = "$home/prat/auto/context/db.json"
 
 . "$home/prat/lib/agents/PlanState.ps1"
 
@@ -27,22 +26,21 @@ function main {
 
 function buildLauncherContext {
     $db = loadLauncherDb $dbPath
-    $livePids = getLiveClaudePids
-    $resolved = resolveSessionIds $db $runningDir $livePids
 
-    # Copilot detection unions into the same live/orphan sets. Claude orphans default to 'claude';
-    # resolveCopilotSessions records 'copilot' for the sessions it resolves.
+    # Both harnesses now carry their session id on their own command line (claude via
+    # --session-id/--resume passed at launch; copilot's launcher does this unprompted), so a
+    # single scan per harness replaces the old hook-fed pid-file matching. Only copilot's command
+    # line also carries a cwd, so only it gets the cwd-match fallback pass.
+    $liveSessionIds = [System.Collections.Generic.HashSet[string]]::new()
+    $orphans        = [System.Collections.Generic.List[string]]::new()
     $sessionHarness = @{}
-    foreach ($sid in $resolved.orphans) { $sessionHarness[$sid] = 'claude' }
-    $copilotRecords = getLiveCopilotRecords
-    resolveCopilotSessions $db $copilotRecords $resolved.liveSessionIds $resolved.orphans $sessionHarness
+    resolveHarnessSessions $db (getLiveSessionRecords 'claude' 'claude.exe')   $liveSessionIds $orphans $sessionHarness $false
+    resolveHarnessSessions $db (getLiveSessionRecords 'copilot' 'copilot.exe') $liveSessionIds $orphans $sessionHarness $true
 
     saveDb $db $dbPath
-    cleanStaleRunningFiles $runningDir $livePids
     attachEntryInfo $db
 
     $notices = [System.Collections.Generic.List[string]]::new()
-    foreach ($n in $resolved.notices) { $notices.Add($n) }
 
     if (-not (getPlansDir)) { $notices.Add('No plans directory configured — O and R unavailable. Provide lib/agents/Get-PlansDir.ps1 in your de repo.') }
 
@@ -55,7 +53,7 @@ function buildLauncherContext {
         $crossFlags = getCrossMachineFlags $syncPath
     }
 
-    return @{ db = $db; liveSessionIds = $resolved.liveSessionIds; orphans = $resolved.orphans; crossFlags = $crossFlags; notices = $notices; sessionHarness = $sessionHarness }
+    return @{ db = $db; liveSessionIds = $liveSessionIds; orphans = $orphans; crossFlags = $crossFlags; notices = $notices; sessionHarness = $sessionHarness }
 }
 
 function loadLauncherDb([string] $path) {
@@ -329,10 +327,6 @@ function openProject($db, $entry, $liveSessionIds) {
 
     if ($rows[$idx].kind -eq 'session') {
         $picked = $rows[$idx].info
-        if ($entry.harness -eq 'claude') {
-            $script:launchPrewriteSid = $picked.sid
-            $script:launchPrewriteCwd = normalizePath $entry.cwd
-        }
         $resumeArgs = getResumeArgs $entry.harness $picked.sid
         $exitCode = launchCl $entry.harness $entry.cwd $entry.planFile @resumeArgs
         if ($exitCode -ne 0) {
@@ -409,9 +403,6 @@ function getCursorGuardScript() {
     return '$__pos = [Console]::CursorLeft, [Console]::CursorTop; if ($__pos[0] -ne 0 -or $__pos[1] -ne 0) { Read-Host "Startup output above - press Enter to continue" }'
 }
 
-$script:launchPrewriteSid = $null  # set before resume launches to pre-write the running file
-$script:launchPrewriteCwd = $null
-
 function launchCl([string] $harness, [string] $cwd, [string] $planFile) {
     resetConsoleMode
     # Use Start-Process -NoNewWindow so the child process inherits the console directly,
@@ -426,23 +417,11 @@ function launchCl([string] $harness, [string] $cwd, [string] $planFile) {
     $encoded  = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd))
     $spParams = @{ FilePath = 'pwsh'; ArgumentList = @('-NoLogo', '-EncodedCommand', $encoded); NoNewWindow = $true; PassThru = $true }
     if ($cwd) { $spParams.WorkingDirectory = $cwd }
-    # CL_PLAN_FILE rides the process environment into cl — consumed by the UserPromptSubmit hook
-    # (stamps planFile into the running file), the statusline, and skills' active-plan default.
+    # CL_PLAN_FILE rides the process environment into cl — consumed by the statusline and skills'
+    # active-plan default.
     $envToken = Set-EnvTemp @{ CL_PLAN_FILE = $planFile }
     try {
         $proc = Start-Process @spParams
-        # Pre-write the running file so the session shows live immediately, before the first
-        # UserPromptSubmit hook fires. Only for claude resume launches (the running-file mechanism
-        # is claude-only; copilot detection reads the live command line directly).
-        if ($harness -eq 'claude' -and $script:launchPrewriteSid) {
-            $runDir = "$home/prat/auto/context/running"
-            $null = New-Item -ItemType Directory $runDir -Force
-            [pscustomobject]@{session_id = $script:launchPrewriteSid; cwd = $script:launchPrewriteCwd} |
-                ConvertTo-Json -Compress |
-                Set-Content "$runDir/pid_$($proc.Id).txt" -Encoding UTF8
-            $script:launchPrewriteSid = $null
-            $script:launchPrewriteCwd = $null
-        }
         $proc.WaitForExit()
         return $proc.ExitCode
     } catch {
@@ -692,27 +671,24 @@ function saveDb($db, [string] $path) {
 
 # --- Process detection ---
 
-function getLiveClaudePids {
-    $procs = Get-Process claude -ErrorAction SilentlyContinue
-    if (-not $procs) { return ,@() }
-    return ,@($procs | Select-Object -ExpandProperty Id | Where-Object { $_ -is [int] })
-}
-
-# Thin wrapper (mockable in tests) over the copilot.exe process query.
-function getCopilotProcs {
-    Get-CimInstance Win32_Process -Filter "Name='copilot.exe'" -ErrorAction SilentlyContinue |
+# Thin wrapper (mockable in tests) over the process command-line query, parameterized by process
+# name so claude.exe and copilot.exe scans share this one implementation.
+function getLiveHarnessProcs([string] $processName) {
+    Get-CimInstance Win32_Process -Filter "Name='$processName'" -ErrorAction SilentlyContinue |
         ForEach-Object { [pscustomobject]@{ CommandLine = $_.CommandLine } }
 }
 
-# Copilot needs no hook: the session id and cwd are already on the copilot.exe command line.
-# Fresh sessions carry `--session-id <uuid>` and `-C <cwd>`; resumed sessions carry `--resume=<uuid>`
-# and no `-C`. Each session spawns two processes (parent + fork) with the same id, so dedup by id.
-function getLiveCopilotRecords {
+# Neither harness needs a hook: copilot's launcher always puts the session id on its own command
+# line, and pl does the same for claude (fresh: --session-id, resume: --resume — see
+# getFreshSessionArgs/getResumeArgs). Fresh copilot sessions also carry `-C <cwd>`; resumed copilot
+# sessions and all claude sessions don't, so cwd stays $null for those. Each session can spawn more
+# than one process sharing the same id (e.g. copilot's parent + fork), so dedup by id.
+function getLiveSessionRecords([string] $harness, [string] $processName) {
     $sidRx = '--(?:session-id|resume)[ =]([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})'
     $cwdRx = '\s-C\s+(\S+)'
     $seen    = @{}
     $records = [System.Collections.Generic.List[object]]::new()
-    foreach ($proc in (getCopilotProcs)) {
+    foreach ($proc in (getLiveHarnessProcs $processName)) {
         $cl = $proc.CommandLine
         if (-not $cl) { continue }
         $m = [regex]::Match($cl, $sidRx)
@@ -723,15 +699,17 @@ function getLiveCopilotRecords {
         $cwd = $null
         $cm = [regex]::Match($cl, $cwdRx)
         if ($cm.Success) { $cwd = $cm.Groups[1].Value }
-        $records.Add(@{ session_id = $sid; cwd = $cwd })
+        $records.Add(@{ session_id = $sid; cwd = $cwd; harness = $harness })
     }
     return ,@($records)
 }
 
-# Mirrors resolveSessionIds for Copilot: match records to entries by id, then by cwd, unioning into
-# the shared liveSessionIds/orphans. Stamps the matched entry's harness and records it in
-# $sessionHarness (session_id -> 'copilot') so launch/resume pick the right harness later.
-function resolveCopilotSessions($entries, $records, $liveSessionIds, $orphans, $sessionHarness) {
+# Matches live-process records to db entries by session id, then (only when $allowCwdMatch, i.e.
+# copilot — claude's command line carries no cwd, and pl-launched claude sessions don't need it)
+# by cwd against a sole unoccupied entry. Unions into the shared liveSessionIds/orphans and stamps
+# the resolved harness onto both the matched entry and $sessionHarness (session_id -> harness) so
+# launch/resume pick the right harness later.
+function resolveHarnessSessions($entries, $records, $liveSessionIds, $orphans, $sessionHarness, [bool] $allowCwdMatch) {
     $sidMap = @{}
     foreach ($entry in $entries) {
         foreach ($sid in $entry.sessionIds) { $sidMap[$sid] = $entry }
@@ -745,8 +723,8 @@ function resolveCopilotSessions($entries, $records, $liveSessionIds, $orphans, $
         if (-not $sid) { continue }
         if ($sidMap.ContainsKey($sid)) {
             $null = $liveSessionIds.Add($sid)
-            $sidMap[$sid].harness   = 'copilot'
-            $sessionHarness[$sid]   = 'copilot'
+            $sidMap[$sid].harness = $rec.harness
+            $sessionHarness[$sid] = $rec.harness
         } else {
             $unmatched.Add($rec)
         }
@@ -756,18 +734,18 @@ function resolveCopilotSessions($entries, $records, $liveSessionIds, $orphans, $
     foreach ($rec in $unmatched) {
         $sid      = $rec.session_id
         $cwdEntry = $null
-        if ($rec.cwd) {
+        if ($allowCwdMatch -and $rec.cwd) {
             $fileCwd    = normalizePath $rec.cwd
             $cwdMatches = @($entries | Where-Object { (normalizePath $_.cwd) -eq $fileCwd -and -not (isLive $_ $liveSessionIds) })
             if ($cwdMatches.Count -eq 1) { $cwdEntry = $cwdMatches[0] }
         }
         if ($cwdEntry) {
             $cwdEntry.sessionIds = @($cwdEntry.sessionIds) + @($sid)
-            $cwdEntry.harness    = 'copilot'
+            $cwdEntry.harness    = $rec.harness
         } else {
             $orphans.Add($sid) | Out-Null
         }
-        $sessionHarness[$sid] = 'copilot'
+        $sessionHarness[$sid] = $rec.harness
         $null = $liveSessionIds.Add($sid)
     }
 }
@@ -829,61 +807,11 @@ function getModelArgs([string] $model) {
     return ,@()
 }
 
-function resolveSessionIds($entries, [string] $rDir, $livePids) {
-    $liveSessionIds = [System.Collections.Generic.HashSet[string]]::new()
-    $orphans        = [System.Collections.Generic.List[string]]::new()
-    $notices        = [System.Collections.Generic.List[string]]::new()
-
-    # Build reverse map: session_id → entry
-    $sidMap = @{}
-    foreach ($entry in $entries) {
-        foreach ($sid in $entry.sessionIds) { $sidMap[$sid] = $entry }
-    }
-
-    if (-not (Test-Path $rDir)) { return @{ liveSessionIds = $liveSessionIds; orphans = $orphans; notices = $notices } }
-
-    # Match running files by session ID, then by the planFile the hook stamped from CL_PLAN_FILE.
-    # Anything else is an orphan — R-register is the repair path.
-    foreach ($file in Get-ChildItem $rDir -Filter 'pid_*.txt' -ErrorAction SilentlyContinue) {
-        $filePid = [int]($file.BaseName -replace 'pid_', '')
-        if ($filePid -notin $livePids) { continue }
-
-        $data = Get-Content $file.FullName -Raw | ConvertFrom-Json -ErrorAction SilentlyContinue
-        if (-not $data -or -not $data.session_id -or -not $data.cwd) { continue }
-
-        if (-not $sidMap.ContainsKey($data.session_id)) {
-            $planEntry = $null
-            if ($data.planFile) {
-                $planEntry = $entries | Where-Object { $_.planFile -eq $data.planFile } | Select-Object -First 1
-            }
-            if ($planEntry) {
-                if ($data.session_id -notin $planEntry.sessionIds) {
-                    $planEntry.sessionIds = @($planEntry.sessionIds) + @($data.session_id)
-                }
-                $sidMap[$data.session_id] = $planEntry
-            } else {
-                $orphans.Add($data.session_id) | Out-Null
-            }
-        }
-        $null = $liveSessionIds.Add($data.session_id)
-    }
-
-    return @{ liveSessionIds = $liveSessionIds; orphans = $orphans; notices = $notices }
-}
-
 function isLive($entry, $liveSessionIds) {
     foreach ($sid in $entry.sessionIds) {
         if ($sid -in $liveSessionIds) { return $true }
     }
     return $false
-}
-
-function cleanStaleRunningFiles([string] $rDir, $livePids) {
-    if (-not (Test-Path $rDir)) { return }
-    foreach ($file in Get-ChildItem $rDir -Filter 'pid_*.txt' -ErrorAction SilentlyContinue) {
-        $filePid = [int]($file.BaseName -replace 'pid_', '')
-        if ($filePid -notin $livePids) { Remove-Item $file.FullName -ErrorAction SilentlyContinue }
-    }
 }
 
 # --- Cross-machine visibility ---

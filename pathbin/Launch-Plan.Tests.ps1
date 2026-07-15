@@ -243,171 +243,6 @@ Describe "indexOfPlan" {
     }
 }
 
-Describe "resolveSessionIds" {
-    It "leaves db unchanged when running dir doesn't exist" {
-        $db = @([pscustomobject]@{planFile = "f.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()})
-
-        resolveSessionIds $db "TestDrive:\norunning" @()
-
-        @($db[0].sessionIds) | Should -HaveCount 0
-    }
-
-    It "treats a cwd-matching untracked session as an orphan (no cwd fallback)" {
-        $rDir = "TestDrive:\running-match"
-        $null = New-Item -ItemType Directory $rDir
-        '{"session_id":"abc-123","cwd":"C:/de"}' | Set-Content "$rDir\pid_99.txt"
-        $db = @([pscustomobject]@{planFile = "f.md"; cwd = "C:/de"; sessionIds = @()})
-
-        $result = resolveSessionIds $db $rDir @(99)
-
-        @($db[0].sessionIds)   | Should -HaveCount 0
-        $result.orphans        | Should -Contain "abc-123"
-        $result.liveSessionIds | Should -Contain "abc-123"
-    }
-
-    It "doesn't duplicate an already-present session_id" {
-        $rDir = "TestDrive:\running-nodup"
-        $null = New-Item -ItemType Directory $rDir
-        '{"session_id":"abc-123","cwd":"C:/de"}' | Set-Content "$rDir\pid_99.txt"
-        $db = @([pscustomobject]@{planFile = "f.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @("abc-123")})
-
-        resolveSessionIds $db $rDir @(99)
-
-        @($db[0].sessionIds) | Should -HaveCount 1
-    }
-
-    It "does not cwd-match an untracked session even when only one entry shares the cwd" {
-        $rDir = "TestDrive:\running-unoccupied"
-        $null = New-Item -ItemType Directory $rDir
-        '{"session_id":"live-sid","cwd":"C:/de"}' | Set-Content "$rDir\pid_99.txt"
-        '{"session_id":"new-sid","cwd":"C:/de"}'  | Set-Content "$rDir\pid_100.txt"
-        $entry1 = [pscustomobject]@{planFile = "f1.md"; cwd = "C:/de"; sessionIds = @("live-sid")}
-        $entry2 = [pscustomobject]@{planFile = "f2.md"; cwd = "C:/de"; sessionIds = @()}
-        $db = @($entry1, $entry2)
-
-        $result = resolveSessionIds $db $rDir @(99, 100)
-
-        @($entry1.sessionIds) | Should -HaveCount 1     # live-sid not duplicated
-        @($entry2.sessionIds) | Should -HaveCount 0
-        $result.orphans       | Should -Contain "new-sid"
-    }
-
-    It "treats session as orphan when cwd matches multiple entries" {
-        $rDir = "TestDrive:\running-ambig"
-        $null = New-Item -ItemType Directory $rDir
-        '{"session_id":"new-sid","cwd":"C:/de"}' | Set-Content "$rDir\pid_99.txt"
-        $entry1 = [pscustomobject]@{planFile = "f1.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
-        $entry2 = [pscustomobject]@{planFile = "f2.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
-        $db = @($entry1, $entry2)
-
-        $result = resolveSessionIds $db $rDir @(99)
-
-        @($entry1.sessionIds) | Should -HaveCount 0
-        @($entry2.sessionIds) | Should -HaveCount 0
-        $result.orphans        | Should -Contain "new-sid"
-    }
-
-    It "matches session by planFile even when cwd matches multiple entries" {
-        $rDir = "TestDrive:\running-planfile-ambig"
-        $null = New-Item -ItemType Directory $rDir
-        '{"session_id":"new-sid","cwd":"C:/de","planFile":"f1.md"}' | Set-Content "$rDir\pid_99.txt"
-        $entry1 = [pscustomobject]@{planFile = "f1.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
-        $entry2 = [pscustomobject]@{planFile = "f2.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()}
-        $db = @($entry1, $entry2)
-
-        $result = resolveSessionIds $db $rDir @(99)
-
-        $entry1.sessionIds    | Should -Contain "new-sid"
-        @($entry2.sessionIds) | Should -HaveCount 0
-        $result.orphans       | Should -Not -Contain "new-sid"
-        $result.liveSessionIds | Should -Contain "new-sid"
-    }
-
-    It "treats session as orphan when planFile doesn't match any db entry" {
-        $rDir = "TestDrive:\running-planfile-miss"
-        $null = New-Item -ItemType Directory $rDir
-        '{"session_id":"new-sid","cwd":"C:/de","planFile":"unknown.md"}' | Set-Content "$rDir\pid_99.txt"
-        $entry = [pscustomobject]@{planFile = "f1.md"; cwd = "C:/de"; sessionIds = @()}
-        $db = @($entry)
-
-        $result = resolveSessionIds $db $rDir @(99)
-
-        @($entry.sessionIds) | Should -HaveCount 0
-        $result.orphans      | Should -Contain "new-sid"
-    }
-
-    It "doesn't add session_id when cwd doesn't match" {
-        $rDir = "TestDrive:\running-nomatch"
-        $null = New-Item -ItemType Directory $rDir
-        '{"session_id":"abc-123","cwd":"C:/de"}' | Set-Content "$rDir\pid_99.txt"
-        $db = @([pscustomobject]@{planFile = "f.md"; state = "discussing"; cwd = "C:/other"; sessionIds = @()})
-
-        resolveSessionIds $db $rDir @()
-
-        @($db[0].sessionIds) | Should -HaveCount 0
-    }
-
-    It "ignores pid file whose pid is not live" {
-        $rDir = "TestDrive:\running-stalePid"
-        $null = New-Item -ItemType Directory $rDir
-        '{"session_id":"stale-sid","cwd":"C:/de"}' | Set-Content "$rDir\pid_99.txt"
-        $db = @([pscustomobject]@{planFile = "f.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()})
-
-        resolveSessionIds $db $rDir @(42)   # pid 99 not in live list
-
-        @($db[0].sessionIds) | Should -HaveCount 0
-    }
-
-    It "processes only live pid files" {
-        $rDir = "TestDrive:\running-livePid"
-        $null = New-Item -ItemType Directory $rDir
-        '{"session_id":"live-sid","cwd":"C:/de","planFile":"f.md"}' | Set-Content "$rDir\pid_99.txt"
-        '{"session_id":"dead-sid","cwd":"C:/de","planFile":"f.md"}' | Set-Content "$rDir\pid_77.txt"
-        $db = @([pscustomobject]@{planFile = "f.md"; cwd = "C:/de"; sessionIds = @()})
-
-        $result = resolveSessionIds $db $rDir @(99)   # only pid 99 is live
-
-        $db[0].sessionIds      | Should -Contain "live-sid"
-        $db[0].sessionIds      | Should -Not -Contain "dead-sid"
-        $result.liveSessionIds | Should -Not -Contain "dead-sid"
-    }
-
-    It "returns orphan session_id in result" {
-        $rDir = "TestDrive:\running-orphan"
-        $null = New-Item -ItemType Directory $rDir
-        '{"session_id":"orphan-sid","cwd":"C:/untracked"}' | Set-Content "$rDir\pid_99.txt"
-        $db = @([pscustomobject]@{planFile = "f.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()})
-
-        $result = resolveSessionIds $db $rDir @(99)
-
-        $result.orphans | Should -Contain "orphan-sid"
-    }
-
-    It "does not flag a notice when session_id is already correctly linked by ID" {
-        $rDir = "TestDrive:\running-conflict"
-        $null = New-Item -ItemType Directory $rDir
-        # pid file cwd matches entry2, but session is already recorded under entry1 by ID
-        '{"session_id":"conflict-sid","cwd":"C:/other"}' | Set-Content "$rDir\pid_99.txt"
-        $entry1 = [pscustomobject]@{planFile = "f1.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @("conflict-sid")}
-        $entry2 = [pscustomobject]@{planFile = "f2.md"; state = "discussing"; cwd = "C:/other"; sessionIds = @()}
-        $db = @($entry1, $entry2)
-
-        $result = resolveSessionIds $db $rDir @(99)
-        $result.notices | Should -BeNullOrEmpty
-    }
-
-    It "returns liveSessionIds set" {
-        $rDir = "TestDrive:\running-liveSet"
-        $null = New-Item -ItemType Directory $rDir
-        '{"session_id":"live-sid","cwd":"C:/de"}' | Set-Content "$rDir\pid_99.txt"
-        $db = @([pscustomobject]@{planFile = "f.md"; state = "discussing"; cwd = "C:/de"; sessionIds = @()})
-
-        $result = resolveSessionIds $db $rDir @(99)
-
-        $result.liveSessionIds | Should -Contain "live-sid"
-    }
-}
-
 Describe "isLive" {
     It "returns true when entry has a session_id in the live set" {
         $entry = [pscustomobject]@{sessionIds = @("abc-123")}
@@ -430,125 +265,121 @@ Describe "isLive" {
     }
 }
 
-Describe "getLiveClaudePids" {
-    It "returns an empty array when no claude process is found" {
-        Mock Get-Process { }
-
-        $result = getLiveClaudePids
-
-        $result -is [array] | Should -BeTrue
-        $result.Count       | Should -Be 0
-    }
-
-    It "returns the PID of each running claude process" {
-        Mock Get-Process { [pscustomobject]@{Id = 1234}; [pscustomobject]@{Id = 5678} }
-
-        $result = getLiveClaudePids
-
-        $result | Should -HaveCount 2
-        $result | Should -Contain 1234
-        $result | Should -Contain 5678
-    }
-}
-
-Describe "getCopilotProcs" {
-    It "returns an empty array when no copilot process is found" {
+Describe "getLiveHarnessProcs" {
+    It "returns an empty array when no process by that name is found" {
         Mock Get-CimInstance { }
 
-        $result = getCopilotProcs
-
-        @($result) | Should -HaveCount 0
+        @(getLiveHarnessProcs 'copilot.exe') | Should -HaveCount 0
     }
 
-    It "projects the command line of each running copilot process" {
-        Mock Get-CimInstance { [pscustomobject]@{CommandLine = 'copilot.exe --session-id abc'} }
+    It "queries by the given process name and projects the command line" {
+        $script:filterUsed = $null
+        Mock Get-CimInstance { param($Filter) $script:filterUsed = $Filter; [pscustomobject]@{CommandLine = 'claude.exe --session-id abc'} }
 
-        $result = @(getCopilotProcs)
+        $result = @(getLiveHarnessProcs 'claude.exe')
 
-        $result | Should -HaveCount 1
-        $result[0].CommandLine | Should -Be 'copilot.exe --session-id abc'
+        $result[0].CommandLine | Should -Be 'claude.exe --session-id abc'
+        $script:filterUsed     | Should -Match 'claude\.exe'
     }
 }
 
-Describe "getLiveCopilotRecords" {
-    It "extracts session_id and cwd from a fresh session cmdline" {
-        Mock getCopilotProcs { @([pscustomobject]@{ CommandLine = 'copilot.exe -C C:\roles\de --session-id 11111111-2222-3333-4444-555555555555 --add-dir C:\de' }) }
+Describe "getLiveSessionRecords" {
+    It "extracts session_id, cwd, and harness from a fresh copilot session cmdline" {
+        Mock getLiveHarnessProcs { @([pscustomobject]@{ CommandLine = 'copilot.exe -C C:\roles\de --session-id 11111111-2222-3333-4444-555555555555 --add-dir C:\de' }) }
 
-        $r = getLiveCopilotRecords
+        $r = getLiveSessionRecords 'copilot' 'copilot.exe'
 
         $r.Count         | Should -Be 1
         $r[0].session_id | Should -Be '11111111-2222-3333-4444-555555555555'
         $r[0].cwd        | Should -Be 'C:\roles\de'
+        $r[0].harness    | Should -Be 'copilot'
     }
 
-    It "extracts session_id from a resumed (--resume=) cmdline with no -C; cwd null" {
-        Mock getCopilotProcs { @([pscustomobject]@{ CommandLine = 'copilot.exe --stream off --resume=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee --add-dir C:\de' }) }
+    It "extracts session_id from a resumed (--resume=) copilot cmdline with no -C; cwd null" {
+        Mock getLiveHarnessProcs { @([pscustomobject]@{ CommandLine = 'copilot.exe --stream off --resume=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee --add-dir C:\de' }) }
 
-        $r = getLiveCopilotRecords
+        $r = getLiveSessionRecords 'copilot' 'copilot.exe'
 
-        $r.Count         | Should -Be 1
         $r[0].session_id | Should -Be 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
         $r[0].cwd        | Should -BeNullOrEmpty
     }
 
+    It "extracts a claude session id from a --session-id cmdline; cwd null (claude carries none)" {
+        Mock getLiveHarnessProcs { @([pscustomobject]@{ CommandLine = 'claude.exe --session-id 22222222-3333-4444-5555-666666666666 do the thing' }) }
+
+        $r = getLiveSessionRecords 'claude' 'claude.exe'
+
+        $r[0].session_id | Should -Be '22222222-3333-4444-5555-666666666666'
+        $r[0].cwd        | Should -BeNullOrEmpty
+        $r[0].harness    | Should -Be 'claude'
+    }
+
+    It "extracts a claude session id from a --resume cmdline (space-separated)" {
+        Mock getLiveHarnessProcs { @([pscustomobject]@{ CommandLine = 'claude.exe --resume 33333333-4444-5555-6666-777777777777' }) }
+
+        $r = getLiveSessionRecords 'claude' 'claude.exe'
+
+        $r[0].session_id | Should -Be '33333333-4444-5555-6666-777777777777'
+    }
+
     It "dedups the parent+fork processes that share a session id" {
-        Mock getCopilotProcs {
+        Mock getLiveHarnessProcs {
             @(
                 [pscustomobject]@{ CommandLine = 'copilot.exe -C C:\roles\de --session-id 11111111-2222-3333-4444-555555555555' },
                 [pscustomobject]@{ CommandLine = 'copilot.exe -C C:\roles\de --session-id 11111111-2222-3333-4444-555555555555' }
             )
         }
 
-        (getLiveCopilotRecords).Count | Should -Be 1
+        (getLiveSessionRecords 'copilot' 'copilot.exe').Count | Should -Be 1
     }
 
     It "returns one record per distinct session" {
-        Mock getCopilotProcs {
+        Mock getLiveHarnessProcs {
             @(
                 [pscustomobject]@{ CommandLine = 'copilot.exe -C C:\a --session-id 11111111-1111-1111-1111-111111111111' },
                 [pscustomobject]@{ CommandLine = 'copilot.exe -C C:\b --session-id 22222222-2222-2222-2222-222222222222' }
             )
         }
 
-        (getLiveCopilotRecords).Count | Should -Be 2
+        (getLiveSessionRecords 'copilot' 'copilot.exe').Count | Should -Be 2
     }
 
     It "skips a process cmdline with no session id" {
-        Mock getCopilotProcs { @([pscustomobject]@{ CommandLine = 'copilot.exe --help' }) }
+        Mock getLiveHarnessProcs { @([pscustomobject]@{ CommandLine = 'copilot.exe --help' }) }
 
-        (getLiveCopilotRecords).Count | Should -Be 0
+        (getLiveSessionRecords 'copilot' 'copilot.exe').Count | Should -Be 0
     }
 
-    It "returns an empty array when no copilot processes are live" {
-        Mock getCopilotProcs { @() }
+    It "returns an empty array when no processes are live" {
+        Mock getLiveHarnessProcs { @() }
 
-        (getLiveCopilotRecords).Count | Should -Be 0
+        (getLiveSessionRecords 'claude' 'claude.exe').Count | Should -Be 0
     }
 }
 
-Describe "resolveCopilotSessions" {
+Describe "resolveHarnessSessions" {
     BeforeEach {
         $script:live       = [System.Collections.Generic.HashSet[string]]::new()
         $script:orphans    = [System.Collections.Generic.List[string]]::new()
         $script:harnessMap = @{}
     }
 
-    It "marks a known session live by id and stamps entry harness copilot" {
+    It "marks a known session live by id and stamps entry+map harness" {
         $entry   = [pscustomobject]@{planFile='f.md'; cwd='C:/de'; sessionIds=@('sid-1'); harness='claude'}
-        $records = @(@{ session_id='sid-1'; cwd=$null })
+        $records = @(@{ session_id='sid-1'; cwd=$null; harness='claude' })
 
-        resolveCopilotSessions @($entry) $records $script:live $script:orphans $script:harnessMap
+        resolveHarnessSessions @($entry) $records $script:live $script:orphans $script:harnessMap $false
 
         $script:live                | Should -Contain 'sid-1'
-        $entry.harness              | Should -Be 'copilot'
-        $script:harnessMap['sid-1'] | Should -Be 'copilot'
+        $entry.harness              | Should -Be 'claude'
+        $script:harnessMap['sid-1'] | Should -Be 'claude'
     }
 
-    It "cwd-matches a new session to the sole unoccupied entry and stamps harness" {
+    It "cwd-matches a new session to the sole unoccupied entry when cwd-matching is allowed" {
         $entry   = [pscustomobject]@{planFile='f.md'; cwd='C:/de'; sessionIds=@(); harness='copilot'}
-        $records = @(@{ session_id='new-sid'; cwd='C:/de' })
+        $records = @(@{ session_id='new-sid'; cwd='C:/de'; harness='copilot' })
 
-        resolveCopilotSessions @($entry) $records $script:live $script:orphans $script:harnessMap
+        resolveHarnessSessions @($entry) $records $script:live $script:orphans $script:harnessMap $true
 
         $entry.sessionIds | Should -Contain 'new-sid'
         $entry.harness    | Should -Be 'copilot'
@@ -556,30 +387,40 @@ Describe "resolveCopilotSessions" {
         $script:orphans   | Should -Not -Contain 'new-sid'
     }
 
+    It "orphans a new session with a matching cwd when cwd-matching is disallowed (claude)" {
+        $entry   = [pscustomobject]@{planFile='f.md'; cwd='C:/de'; sessionIds=@(); harness='claude'}
+        $records = @(@{ session_id='new-sid'; cwd='C:/de'; harness='claude' })
+
+        resolveHarnessSessions @($entry) $records $script:live $script:orphans $script:harnessMap $false
+
+        $script:orphans      | Should -Contain 'new-sid'
+        @($entry.sessionIds) | Should -HaveCount 0
+    }
+
     It "treats a new session as orphan when no cwd matches" {
         $entry   = [pscustomobject]@{planFile='f.md'; cwd='C:/other'; sessionIds=@(); harness='copilot'}
-        $records = @(@{ session_id='new-sid'; cwd='C:/de' })
+        $records = @(@{ session_id='new-sid'; cwd='C:/de'; harness='copilot' })
 
-        resolveCopilotSessions @($entry) $records $script:live $script:orphans $script:harnessMap
+        resolveHarnessSessions @($entry) $records $script:live $script:orphans $script:harnessMap $true
 
         $script:orphans               | Should -Contain 'new-sid'
         $script:harnessMap['new-sid'] | Should -Be 'copilot'
     }
 
-    It "treats a resumed session with null cwd as orphan when untracked" {
+    It "treats a session with null cwd as orphan when untracked" {
         $entry   = [pscustomobject]@{planFile='f.md'; cwd='C:/de'; sessionIds=@(); harness='copilot'}
-        $records = @(@{ session_id='resumed-sid'; cwd=$null })
+        $records = @(@{ session_id='resumed-sid'; cwd=$null; harness='copilot' })
 
-        resolveCopilotSessions @($entry) $records $script:live $script:orphans $script:harnessMap
+        resolveHarnessSessions @($entry) $records $script:live $script:orphans $script:harnessMap $true
 
         $script:orphans | Should -Contain 'resumed-sid'
     }
 
     It "does not cwd-match an entry already occupied by a live session" {
         $entry   = [pscustomobject]@{planFile='f.md'; cwd='C:/de'; sessionIds=@('live-1'); harness='copilot'}
-        $records = @(@{ session_id='live-1'; cwd='C:/de' }, @{ session_id='new-sid'; cwd='C:/de' })
+        $records = @(@{ session_id='live-1'; cwd='C:/de'; harness='copilot' }, @{ session_id='new-sid'; cwd='C:/de'; harness='copilot' })
 
-        resolveCopilotSessions @($entry) $records $script:live $script:orphans $script:harnessMap
+        resolveHarnessSessions @($entry) $records $script:live $script:orphans $script:harnessMap $true
 
         $script:orphans      | Should -Contain 'new-sid'
         @($entry.sessionIds) | Should -HaveCount 1
@@ -588,13 +429,22 @@ Describe "resolveCopilotSessions" {
     It "orphans a new session when cwd matches multiple entries" {
         $e1      = [pscustomobject]@{planFile='f1.md'; cwd='C:/de'; sessionIds=@(); harness='copilot'}
         $e2      = [pscustomobject]@{planFile='f2.md'; cwd='C:/de'; sessionIds=@(); harness='copilot'}
-        $records = @(@{ session_id='new-sid'; cwd='C:/de' })
+        $records = @(@{ session_id='new-sid'; cwd='C:/de'; harness='copilot' })
 
-        resolveCopilotSessions @($e1,$e2) $records $script:live $script:orphans $script:harnessMap
+        resolveHarnessSessions @($e1,$e2) $records $script:live $script:orphans $script:harnessMap $true
 
         $script:orphans   | Should -Contain 'new-sid'
         @($e1.sessionIds) | Should -HaveCount 0
         @($e2.sessionIds) | Should -HaveCount 0
+    }
+
+    It "doesn't duplicate an already-present session id" {
+        $entry   = [pscustomobject]@{planFile='f.md'; cwd='C:/de'; sessionIds=@('sid-1'); harness='claude'}
+        $records = @(@{ session_id='sid-1'; cwd=$null; harness='claude' })
+
+        resolveHarnessSessions @($entry) $records $script:live $script:orphans $script:harnessMap $false
+
+        @($entry.sessionIds) | Should -HaveCount 1
     }
 }
 
@@ -877,31 +727,6 @@ Describe "buildRowFields" {
     }
 }
 
-Describe "cleanStaleRunningFiles" {
-    It "removes pid files whose pids are not live" {
-        $rDir = "TestDrive:\clean-stale"
-        $null = New-Item -ItemType Directory $rDir
-        Set-Content "$rDir\pid_99.txt" '{"session_id":"s1","cwd":"C:/de"}'
-
-        cleanStaleRunningFiles $rDir @(42)   # pid 99 not live
-
-        Test-Path "$rDir\pid_99.txt" | Should -BeFalse
-    }
-
-    It "keeps pid files whose pids are live" {
-        $rDir = "TestDrive:\clean-keep"
-        $null = New-Item -ItemType Directory $rDir
-        Set-Content "$rDir\pid_99.txt" '{"session_id":"s1","cwd":"C:/de"}'
-
-        cleanStaleRunningFiles $rDir @(99)
-
-        Test-Path "$rDir\pid_99.txt" | Should -BeTrue
-    }
-
-    It "does nothing when running dir doesn't exist" {
-        { cleanStaleRunningFiles "TestDrive:\clean-nodir" @() } | Should -Not -Throw
-    }
-}
 
 Describe "updatePresenceFile" {
     It "writes a presence file with current machine's plan files" {
@@ -1043,9 +868,10 @@ Describe "openProject" {
         Mock tryInvokeAgentModelList { $null }
         Mock pickFromList { return 0 }   # selects the sole fresh row by default now that fresh launches route through the picker too
         $script:launched = $null
-        $script:launchPrewriteSid = $null
-        $script:launchPrewriteCwd = $null
-        Mock launchCl { $script:launched = @{harness = $harness; cwd = $cwd; planFile = $planFile; rest = @($args)}; return 0 }
+        Mock launchCl {
+            $script:launched = @{harness = $harness; cwd = $cwd; planFile = $planFile; rest = @($args)}
+            return 0
+        }
     }
 
     It "live entry: does not launch, returns false" {
@@ -1067,7 +893,7 @@ Describe "openProject" {
 
         $result                   | Should -BeTrue
         $script:launched.planFile | Should -Be $plan
-        $script:launched.rest[-1] | Should -Be "Please do the next step in $plan"
+        $script:launched.rest     | Should -Contain "Please do the next step in $plan"
     }
 
     It "ready-to-plan + no sessions: fresh launch with plan-the-next-step prompt" {
@@ -1077,7 +903,7 @@ Describe "openProject" {
 
         openProject $db $entry @()
 
-        $script:launched.rest[-1] | Should -Be "Please plan the next step in $plan"
+        $script:launched.rest     | Should -Contain "Please plan the next step in $plan"
     }
 
     It "code-complete + no sessions: fresh launch with review prompt" {
@@ -1087,8 +913,9 @@ Describe "openProject" {
 
         openProject $db $entry @()
 
-        $script:launched.rest[-1] | Should -Match 'code-complete'
-        $script:launched.rest[-1] | Should -Match 'review'
+        $joined = $script:launched.rest -join ' '
+        $joined | Should -Match 'code-complete'
+        $joined | Should -Match 'review'
     }
 
     It "no frontmatter: treated as ready-to-plan" {
@@ -1098,7 +925,7 @@ Describe "openProject" {
 
         openProject $db $entry @()
 
-        $script:launched.rest[-1] | Should -Be "Please plan the next step in $plan"
+        $script:launched.rest     | Should -Contain "Please plan the next step in $plan"
     }
 
     It "fresh launch: updates cwd and saves db" {
@@ -1122,7 +949,7 @@ Describe "openProject" {
 
         $result                               | Should -BeTrue
         (Get-PlanState -PlanFile $plan).State | Should -Be 'ready-to-implement'
-        $script:launched.rest[-1]             | Should -Be "Please do the next step in $plan"
+        $script:launched.rest                 | Should -Contain "Please do the next step in $plan"
         @($entry.sessionIds)                  | Should -Contain "old-sid"   # kept, alongside the new fresh session id
     }
 
@@ -1154,7 +981,7 @@ Describe "openProject" {
         $result = openProject $db $entry @()
 
         $result                   | Should -BeTrue
-        $script:launched.rest[-1] | Should -Be "Please do the next step in $plan"
+        $script:launched.rest     | Should -Contain "Please do the next step in $plan"
         $script:launched.rest     | Should -Not -Contain "--resume"
         @($entry.sessionIds)      | Should -Contain "sid-1"   # kept, alongside the new fresh session id
     }
@@ -1247,7 +1074,7 @@ Describe "openProject" {
 
         openProject $db $entry @()
 
-        $script:launched.rest[-1] | Should -Be "Please do the next step in $plan"
+        $script:launched.rest     | Should -Contain "Please do the next step in $plan"
     }
 
     It "failed resume: removes only the failed sid, keeps the rest, returns true" {
@@ -1284,7 +1111,7 @@ Describe "openProject" {
         $script:launched.harness | Should -Be 'copilot'
     }
 
-    It "copilot harness resume: uses the combined --resume=<id> arg and skips the running-file prewrite" {
+    It "copilot harness resume: uses the combined --resume=<id> arg" {
         $plan  = newPlan 'res-copilot' 'ready-to-implement'
         $entry = newEntry $plan @("sid-1") 'copilot'
         $db    = newDb $entry
@@ -1295,10 +1122,9 @@ Describe "openProject" {
 
         $script:launched.harness  | Should -Be 'copilot'
         $script:launched.rest     | Should -Contain "--resume=sid-1"
-        $script:launchPrewriteSid | Should -BeNullOrEmpty
     }
 
-    It "claude harness resume: still pre-writes the running file" {
+    It "claude harness resume: uses the space-separated --resume <id> args" {
         $plan  = newPlan 'res-claude' 'ready-to-implement'
         $entry = newEntry $plan @("sid-1") 'claude'
         $db    = newDb $entry
@@ -1309,7 +1135,6 @@ Describe "openProject" {
 
         $script:launched.rest     | Should -Contain "--resume"
         $script:launched.rest     | Should -Contain "sid-1"
-        $script:launchPrewriteSid | Should -Be 'sid-1'
     }
 
     It "no sessions: routes through the picker with a single fresh row (not a direct launch)" {
@@ -1372,7 +1197,7 @@ Describe "openProject" {
 
         $script:launched.rest[0]  | Should -Be '--model'
         $script:launched.rest[1]  | Should -Be 'Opus'
-        $script:launched.rest[-1] | Should -Be "Please do the next step in $plan"
+        $script:launched.rest     | Should -Contain "Please do the next step in $plan"
     }
 
     It "picking the default model row omits --model" {
@@ -1386,7 +1211,7 @@ Describe "openProject" {
 
         openProject $db $entry @()
 
-        $script:launched.rest[-1] | Should -Be "Please do the next step in $plan"
+        $script:launched.rest     | Should -Contain "Please do the next step in $plan"
         $script:launched.rest     | Should -Not -Contain '--model'
     }
 
@@ -1415,7 +1240,7 @@ Describe "openProject" {
         openProject $db $entry @()
 
         $script:pickerItems[0].ContainsKey('modelList') | Should -BeFalse
-        $script:launched.rest[-1] | Should -Be "Please do the next step in $plan"
+        $script:launched.rest     | Should -Contain "Please do the next step in $plan"
     }
 }
 
@@ -1498,19 +1323,19 @@ Describe "getFreshSessionArgs" {
     It "generates a --session-id, returns it, and appends it to entry.sessionIds" {
         $entry = [pscustomobject]@{ sessionIds = @() }
 
-        $args = getFreshSessionArgs 'claude' $entry
+        $got = getFreshSessionArgs 'claude' $entry
 
-        $args[0] | Should -Be '--session-id'
-        $args[1] | Should -Match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
-        $entry.sessionIds | Should -Contain $args[1]
+        $got[0] | Should -Be '--session-id'
+        $got[1] | Should -Match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+        $entry.sessionIds | Should -Contain $got[1]
     }
 
     It "returns no args and leaves sessionIds untouched for a non-claude harness (its own launcher supplies one)" {
         $entry = [pscustomobject]@{ sessionIds = @('existing') }
 
-        $args = getFreshSessionArgs 'copilot' $entry
+        $got = getFreshSessionArgs 'copilot' $entry
 
-        @($args).Count    | Should -Be 0
+        @($got).Count         | Should -Be 0
         @($entry.sessionIds) | Should -Be @('existing')
     }
 }
@@ -1914,7 +1739,7 @@ Describe "openUntracked" {
         $db.Count       | Should -Be 1
         $db[0].planFile | Should -Be $plan
         $db[0].harness  | Should -Be 'claude'
-        $script:launched.rest[-1] | Should -Be "Please plan the next step in $plan"
+        $script:launched.rest     | Should -Contain "Please plan the next step in $plan"
         Should -Invoke saveDb -Times 1
     }
 
@@ -1926,7 +1751,7 @@ Describe "openUntracked" {
         $result = openUntracked $db
 
         $result | Should -BeTrue
-        $script:launched.rest[-1] | Should -Be "Please do the next step in $plan"
+        $script:launched.rest     | Should -Contain "Please do the next step in $plan"
     }
 
     It "returns true even when cl fails (TUI refreshes)" {
