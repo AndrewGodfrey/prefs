@@ -8,7 +8,7 @@ sessions (Claude Code and GitHub Copilot).
 Plan tracking is split across three ledgers with different owners:
 
 1. **Plan-file frontmatter (YAML)** — plan lifecycle state + next-step pointer. Git-synced with the plan.
-   Written only by the state script (`prat/lib/agents/Set-PlanState.ps1`, dot-sourced by pl), which the
+   Written only by the state script (`prat/lib/agents/PlanState.ps1`, dot-sourced by pl), which the
    agent invokes at deliberate boundaries via skills such as `/wrap`, `/wrap-session`, and `/code-complete`
    — the model never hand-edits these keys. Three keys:
    - `state` — lifecycle word (see table below);
@@ -49,8 +49,8 @@ One row per db entry: status marker, plan filename, frontmatter state. The marke
 
 Plans open on another machine get an `⚠ other-machine` flag (see cross-machine visibility below).
 
-Keys: `Enter` open, `O` open untracked plan, `R` register orphan session, `S` change state (repair tool),
-`U` unregister, `Q`/`Esc` quit.
+Keys: `Enter` open, `O` open untracked plan, `R` register orphan session, `S` change state,
+`V` view plan file, `U` unregister, `Q`/`Esc` quit.
 
 ## Enter: the fresh/resume picker
 
@@ -91,9 +91,14 @@ session id.
 - **R — register session**: repair for orphan sessions (live sessions pl can't match to a db entry).
   Two-step picker: session, then plan (tracked + untracked). Creates the db entry if needed and links the
   session id.
-- **S — change state**: a repair tool for when something has gone wrong — normal state changes happen via
-  the agent's state script during sessions. Writes through `Set-PlanState`. Blocked while a session is
-  live.
+- **S — change state**: chiefly a repair tool for when something has gone wrong — normal state changes
+  happen via the agent's state script during sessions. It doubles as the sanctioned lightweight advance
+  gesture (`S` → `I`) for skipping straight to `ready-to-implement` after a refine that needs no plan
+  review; that path bypasses `/wrap`'s planning-close reflect, so use it sparingly. Writes through
+  `Set-PlanState`. Blocked while a session is live.
+- **V — view plan**: opens the selected plan file via `Open-FileInEditor` (the `e` alias's target;
+  prat-deployed, so available in the interactive profile pl runs under). No-op if that alias isn't
+  installed.
 - **U — unregister**: removes the db entry. Blocked while live.
 
 ## db.json

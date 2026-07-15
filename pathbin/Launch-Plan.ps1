@@ -11,7 +11,7 @@ param([switch] $NoSyncBackedWarning)
 $dbPath     = "$home/prat/auto/context/db.json"
 $runningDir = "$home/prat/auto/context/running"
 
-. "$home/prat/lib/agents/Set-PlanState.ps1"
+. "$home/prat/lib/agents/PlanState.ps1"
 
 function main {
     saveConsoleMode
@@ -73,9 +73,11 @@ function attachEntryInfo($db) {
 }
 
 function updateEntryInfo($entry) {
-    $state     = (Get-PlanState -PlanFile $entry.planFile).State
+    $planState = Get-PlanState -PlanFile $entry.planFile
+    $state     = $planState.State
     $resumable = @(getSessionInfos $entry.sessionIds).Count -gt 0
     $entry | Add-Member -NotePropertyName state -NotePropertyValue $state -Force
+    $entry | Add-Member -NotePropertyName nextStep -NotePropertyValue $planState.NextStep -Force
     $entry | Add-Member -NotePropertyName enterKind -NotePropertyValue (getLaunchAction $state $resumable $entry.planFile).kind -Force
 }
 
@@ -116,6 +118,9 @@ function runLauncher($db, $liveSessionIds, $orphans, $crossFlags, $notices, $ses
                     }
                 }
             }
+            { $_ -in 'V', 'v' } {
+                if ($db.Count -gt 0) { openInEditor $db[$selected].planFile }
+            }
             { $_ -in 'U', 'u' } {
                 if ($db.Count -gt 0) {
                     if (isLive $db[$selected] $liveSessionIds) {
@@ -132,7 +137,11 @@ function runLauncher($db, $liveSessionIds, $orphans, $crossFlags, $notices, $ses
     }
 }
 
-function displayState($entry) { if ($entry.state) { $entry.state } else { '-' } }
+function displayState($entry) {
+    if ($entry.state -and $entry.nextStep) { return "$($entry.state): $($entry.nextStep)" }
+    if ($entry.state) { return $entry.state }
+    return '-'
+}
 
 # TUI selection restore: index of $planFile in the (possibly rebuilt) db; top of list if absent.
 function indexOfPlan($db, [string] $planFile) {
@@ -142,6 +151,26 @@ function indexOfPlan($db, [string] $planFile) {
         }
     }
     return 0
+}
+
+# Pure: builds a row's fixed-width fields, truncating the variable ones (name, state, cross flag —
+# in that priority order) so the total stays within $width. Keeps prefix/status untouched (fixed
+# width) and lets renderList print each field in its own color.
+function buildRowFields($entry, [bool] $isSelected, [bool] $live, [bool] $isCross, [int] $maxNameLen, [int] $maxStateLen, [int] $width) {
+    $prefix   = if ($isSelected) { '→ ' } else { '  ' }
+    $status   = if ($live) { '[live]  ' } elseif ($entry.enterKind -eq 'resume') { '[resume]' } else { '[fresh] ' }
+    $planName = Split-Path $entry.planFile -Leaf
+
+    $nameField  = "  $($planName.PadRight($maxNameLen))"
+    $stateField = "  $((displayState $entry).PadRight($maxStateLen))"
+    $crossField = if ($isCross) { '  ⚠ other-machine' } else { '' }
+
+    $used = $prefix.Length + $status.Length
+    $nameField = truncateLabel $nameField ([Math]::Max(0, $width - $used));  $used += $nameField.Length
+    $stateField = truncateLabel $stateField ([Math]::Max(0, $width - $used)); $used += $stateField.Length
+    $crossField = truncateLabel $crossField ([Math]::Max(0, $width - $used))
+
+    return @{ prefix = $prefix; status = $status; statusFg = if ($live) { 'Green' } elseif ($entry.enterKind -eq 'resume') { 'Cyan' } else { 'DarkGray' }; nameField = $nameField; stateField = $stateField; crossField = $crossField }
 }
 
 function renderList($db, $selected, $liveSessionIds, $orphans, $crossFlags, $notices, $transientError) {
@@ -154,28 +183,26 @@ function renderList($db, $selected, $liveSessionIds, $orphans, $crossFlags, $not
     $maxNameLen  = if ($db.Count -gt 0) { ($db | ForEach-Object { (Split-Path $_.planFile -Leaf).Length } | Measure-Object -Maximum).Maximum } else { 0 }
     $maxStateLen = if ($db.Count -gt 0) { ($db | ForEach-Object { (displayState $_).Length } | Measure-Object -Maximum).Maximum } else { 0 }
 
+    $width = getConsoleWidth
     for ($i = 0; $i -lt $db.Count; $i++) {
-        $entry    = $db[$i]
-        $live     = isLive $entry $liveSessionIds
-        $isCross  = $crossFlags -contains $entry.planFile
-        $prefix   = if ($i -eq $selected) { '→ ' } else { '  ' }
+        $entry   = $db[$i]
+        $live    = isLive $entry $liveSessionIds
+        $isCross = $crossFlags -contains $entry.planFile
+        $nameFg  = if ($i -eq $selected) { 'White' } else { 'Gray' }
         # Marker = what Enter does: switch to the live session is impossible ([live]), open the
         # session picker ([resume]), or start a fresh session ([fresh]).
-        $status   = if ($live) { '[live]  ' } elseif ($entry.enterKind -eq 'resume') { '[resume]' } else { '[fresh] ' }
-        $statusFg = if ($live) { 'Green' } elseif ($entry.enterKind -eq 'resume') { 'Cyan' } else { 'DarkGray' }
-        $nameFg   = if ($i -eq $selected) { 'White' } else { 'Gray' }
-        $planName = Split-Path $entry.planFile -Leaf
+        $f = buildRowFields $entry ($i -eq $selected) $live $isCross $maxNameLen $maxStateLen $width
 
-        Write-Host -NoNewline $prefix
-        Write-Host -NoNewline $status -ForegroundColor $statusFg
-        Write-Host -NoNewline "  $($planName.PadRight($maxNameLen))" -ForegroundColor $nameFg
-        Write-Host -NoNewline "  $((displayState $entry).PadRight($maxStateLen))"
-        if ($isCross) { Write-Host -NoNewline '  ⚠ other-machine' -ForegroundColor Yellow }
+        Write-Host -NoNewline $f.prefix
+        Write-Host -NoNewline $f.status -ForegroundColor $f.statusFg
+        Write-Host -NoNewline $f.nameField -ForegroundColor $nameFg
+        Write-Host -NoNewline $f.stateField
+        if ($f.crossField) { Write-Host -NoNewline $f.crossField -ForegroundColor Yellow }
         Write-Host ''
     }
 
     Write-Host ''
-    Write-Host '  [↑↓] navigate  [Enter] open  [O] open  [R] register  [S] state  [U] unregister  [Q] quit' -ForegroundColor DarkCyan
+    Write-Host '  [↑↓] navigate  [Enter] open  [O] open  [R] register  [S] state  [V] view  [U] unregister  [Q] quit' -ForegroundColor DarkCyan
 
     if (($notices -and $notices.Count -gt 0) -or ($orphans -and $orphans.Count -gt 0)) {
         Write-Host ''
@@ -192,7 +219,10 @@ function renderList($db, $selected, $liveSessionIds, $orphans, $crossFlags, $not
 
 # --- Actions ---
 
-# S is a repair tool: normal state changes happen via the agent's state script during sessions.
+# S is chiefly a repair tool for when something has gone wrong — normal state changes happen via
+# the agent's state script during sessions. It doubles as the sanctioned lightweight advance
+# gesture (S -> I) for skipping straight to ready-to-implement after a refine that needs no plan
+# review; that path bypasses /wrap's planning-close reflect, so use it sparingly.
 function changeState($db, $entry) {
     clearConsole
     Write-Host "  Change state: $(Split-Path $entry.planFile -Leaf)" -ForegroundColor Cyan
@@ -232,6 +262,21 @@ function getLaunchAction([string] $state, [bool] $hasResumableSessions, [string]
     return @{ kind = $kind; prompt = $prompt; setState = $null }
 }
 
+# ready-to-implement's sessions are the spent planning ones, so the picker defaults to a fresh
+# session there; ready-to-plan and code-complete default to continuing/approving the existing one.
+function defaultsToFreshPicker([string] $state) {
+    return $state -eq 'ready-to-implement'
+}
+
+# Session GUIDs in the rows don't identify the plan, and openUntracked shares the bare 'Open plan'
+# title — disambiguate by naming the plan in the title line instead.
+function getSessionPickerTitle([string] $planFile) {
+    $name  = Split-Path $planFile -Leaf
+    $title = getPlanTitle $planFile
+    if ($title) { return "$name — $title" }
+    return $name
+}
+
 function openProject($db, $entry, $liveSessionIds) {
     if (isLive $entry $liveSessionIds) {
         Write-Host 'A session is already live for this plan — switch to it instead.' -ForegroundColor Yellow
@@ -246,7 +291,7 @@ function openProject($db, $entry, $liveSessionIds) {
 
     # Every fresh launch goes through the picker (a single "(start fresh session)" row when there
     # are no sessions), so the inline model field below is always reachable.
-    $freshRow = @{ kind = 'fresh' }
+    $freshRow = @{ kind = 'fresh'; harness = $entry.harness }
     $modelList = getModelList $entry.harness
     if ($modelList) {
         # Start on <default> (the last entry) — no --model arg, matching today's behavior.
@@ -259,17 +304,16 @@ function openProject($db, $entry, $liveSessionIds) {
         foreach ($info in ($infos | Select-Object -First 3)) { $rows.Add(@{ kind = 'session'; info = $info }) }   # older sessions stay in the db, unshown
     }
     $rows.Add($freshRow)
-    # Post-wrap planning usually wants a fresh session; mid-work states default to resuming.
-    $initial = if ($action.kind -eq 'resume' -and $state -ne 'ready-to-plan') { 0 } else { $rows.Count - 1 }
+    $initial = if ($action.kind -eq 'resume' -and -not (defaultsToFreshPicker $state)) { 0 } else { $rows.Count - 1 }
 
     $idx = pickFromList $rows {
         param($r)
         if ($r.kind -ne 'fresh') { return "$($r.info.lastActive.ToString('yyyy-MM-dd HH:mm'))  $($r.info.summary)" }
-        if (-not $r.modelList) { return '(start fresh session)' }
+        if (-not $r.modelList) { return "(start fresh session)   $($r.harness)" }
         $choice     = $r.modelList[$r.modelIndex]
         $modelLabel = if ($choice.model) { "$($choice.displayName)  (cost x$($choice.relativeCost))" } else { $choice.displayName }
-        return "(start fresh session)   model: $modelLabel  ‹ ›"
-    } 'Open plan' $initial { param($item, $direction) advanceFreshRowModel $item $direction }
+        return "(start fresh session)   $($r.harness): $modelLabel  ‹ ›"
+    } (getSessionPickerTitle $entry.planFile) $initial { param($item, $direction) advanceFreshRowModel $item $direction }
     if ($null -eq $idx) { return $false }
 
     if ($rows[$idx].kind -eq 'session') {
@@ -346,6 +390,13 @@ function resetConsoleMode {
     [LpConsole]::SetConsoleMode($hOut, $script:savedConsoleOutMode) | Out-Null
 }
 
+# pl clears the console right before launching, so a cursor not at (0,0) when the child pwsh
+# reaches `& cl` means its profile load printed something above — pause so it can be read before
+# `cl`'s own UI overwrites it.
+function getCursorGuardScript() {
+    return '$__pos = [Console]::CursorLeft, [Console]::CursorTop; if ($__pos[0] -ne 0 -or $__pos[1] -ne 0) { Read-Host "Startup output above - press Enter to continue" }'
+}
+
 $script:launchPrewriteSid = $null  # set before resume launches to pre-write the running file
 $script:launchPrewriteCwd = $null
 
@@ -359,6 +410,7 @@ function launchCl([string] $harness, [string] $cwd, [string] $planFile) {
     $clArgs   = getClExtraArgs $harness $args
     $argStr   = ($clArgs | ForEach-Object { if ($_.StartsWith('-')) { $_ } else {'"' + ($_ -replace '"', '""') + '"' }}) -join ' '
     $cmd      = if ($argStr) { "& cl $argStr" } else { '& cl' }
+    $cmd      = "$(getCursorGuardScript); $cmd"
     $encoded  = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd))
     $spParams = @{ FilePath = 'pwsh'; ArgumentList = @('-NoLogo', '-EncodedCommand', $encoded); NoNewWindow = $true; PassThru = $true }
     if ($cwd) { $spParams.WorkingDirectory = $cwd }
@@ -388,9 +440,26 @@ function launchCl([string] $harness, [string] $cwd, [string] $planFile) {
     }
 }
 
-function clearConsole { [Console]::Clear() }    # thin wrapper so tests can mock it
-function readStateKey  { [Console]::ReadKey($true) }  # thin wrapper so tests can mock it
-function readListKey   { [Console]::ReadKey($true) }  # thin wrapper so tests can mock it
+# Thin wrapper so tests can mock it. Absent for non-de users / when the editor alias isn't
+# installed — a no-op in that case, matching Get-DefaultHarness/Get-AgentModelList's pattern.
+function openInEditor([string] $path) {
+    $cmd = Get-Command Open-FileInEditor -ErrorAction SilentlyContinue
+    if ($cmd) { & $cmd $path }
+}
+
+function clearConsole   { [Console]::Clear() }        # thin wrapper so tests can mock it
+function readStateKey   { [Console]::ReadKey($true) } # thin wrapper so tests can mock it
+function readListKey    { [Console]::ReadKey($true) } # thin wrapper so tests can mock it
+function getConsoleWidth { [Console]::WindowWidth }   # thin wrapper so tests can mock it
+
+# Truncates $label to at most $width characters, ellipsis-terminated when it doesn't fit — so a
+# long label gets shortened instead of the terminal line-wrapping it and breaking column alignment.
+function truncateLabel([string] $label, [int] $width) {
+    if ($width -le 0) { return '' }
+    if ($label.Length -le $width) { return $label }
+    if ($width -eq 1) { return $label.Substring(0, 1) }
+    return $label.Substring(0, $width - 1) + '…'
+}
 
 function showLaunchError([int] $exitCode) {
     # Note: no console clear here — cl's own output is already visible; clearing would erase it.
@@ -555,10 +624,12 @@ function pickFromList($items, $labelFn, $title, [int] $initialSelected = 0, $onH
         clearConsole
         Write-Host "  $title" -ForegroundColor Cyan
         Write-Host ''
+        $width = getConsoleWidth
         for ($i = 0; $i -lt $labels.Count; $i++) {
             $prefix = if ($i -eq $selected) { '→ ' } else { '  ' }
             $fg     = if ($i -eq $selected) { 'White' } else { 'Gray' }
-            Write-Host "$prefix$($labels[$i])" -ForegroundColor $fg
+            $label  = truncateLabel $labels[$i] ([Math]::Max(0, $width - $prefix.Length))
+            Write-Host "$prefix$label" -ForegroundColor $fg
         }
         Write-Host ''
         Write-Host '  [↑↓] navigate  [Enter] select  [Esc] cancel' -ForegroundColor DarkCyan

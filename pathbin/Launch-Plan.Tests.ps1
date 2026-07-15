@@ -168,6 +168,16 @@ Describe "attachEntryInfo" {
         $db[1].state | Should -BeNullOrEmpty
     }
 
+    It "attaches the frontmatter next-step pointer" {
+        $plan = newAttachPlan 'pointer' 'ready-to-implement'
+        $null = Set-PlanState -PlanFile $plan -NextStep 'Step 1: x'
+        $db = @([pscustomobject]@{planFile = $plan; cwd = "C:/de"; sessionIds = @()})
+
+        attachEntryInfo $db
+
+        $db[0].nextStep | Should -Be 'Step 1: x'
+    }
+
     It "attaches enterKind resume when resumable sessions exist, fresh when none" {
         Mock getSessionInfos { param($sessionIds) if (@($sessionIds).Count -gt 0) {
             @([pscustomobject]@{sid = 'sid-1'; lastActive = Get-Date; summary = 's'})
@@ -192,6 +202,23 @@ Describe "attachEntryInfo" {
         attachEntryInfo $db
 
         $db[0].enterKind | Should -Be 'fresh'
+    }
+}
+
+Describe "displayState" {
+    It "shows state and next-step pointer when both are present" {
+        $entry = [pscustomobject]@{state = 'ready-to-implement'; nextStep = 'Step 5: model picker'}
+        displayState $entry | Should -Be 'ready-to-implement: Step 5: model picker'
+    }
+
+    It "falls back to state alone when there is no pointer" {
+        $entry = [pscustomobject]@{state = 'ready-to-plan'; nextStep = $null}
+        displayState $entry | Should -Be 'ready-to-plan'
+    }
+
+    It "shows a dash when neither state nor pointer is present" {
+        $entry = [pscustomobject]@{state = $null; nextStep = $null}
+        displayState $entry | Should -Be '-'
     }
 }
 
@@ -571,6 +598,23 @@ Describe "resolveCopilotSessions" {
     }
 }
 
+Describe "openInEditor" {
+    It "does nothing when Open-FileInEditor isn't on PATH" {
+        Mock Get-Command { $null } -ParameterFilter { $Name -eq 'Open-FileInEditor' }
+
+        { openInEditor 'C:/plans/foo.md' } | Should -Not -Throw
+    }
+
+    It "invokes Open-FileInEditor with the path when available" {
+        $script:invoked = $null
+        function Open-FileInEditor { param($p) $script:invoked = $p }
+
+        openInEditor 'C:/plans/foo.md'
+
+        $script:invoked | Should -Be 'C:/plans/foo.md'
+    }
+}
+
 Describe "getResumeArgs" {
     It "claude uses space-separated --resume" {
         $r = getResumeArgs 'claude' 'sid-1'
@@ -673,6 +717,16 @@ Describe "advanceFreshRowModel" {
     }
 }
 
+Describe "getCursorGuardScript" {
+    It "checks the console cursor position and offers a pause to read startup output" {
+        $script = getCursorGuardScript
+
+        $script | Should -Match 'CursorLeft'
+        $script | Should -Match 'CursorTop'
+        $script | Should -Match 'Read-Host'
+    }
+}
+
 Describe "getModelArgs" {
     It "returns no args for a null model (<default>)" {
         $r = getModelArgs $null
@@ -689,6 +743,7 @@ Describe "pickFromList" {
     BeforeEach {
         Mock Write-Host { }
         Mock clearConsole { }
+        Mock getConsoleWidth { 200 }
     }
 
     It "Left/Right are no-ops when no onHorizontal is supplied" {
@@ -754,6 +809,18 @@ Describe "pickFromList" {
         pickFromList @('a', 'b') { param($i) $i } | Should -BeNullOrEmpty
     }
 
+    It "truncates a label wider than the console instead of letting it wrap" {
+        Mock getConsoleWidth { 10 }
+        Mock readListKey { [pscustomobject]@{Key = 'Enter'} }
+        $script:writes = [System.Collections.Generic.List[string]]::new()
+        Mock Write-Host { param($Object) $script:writes.Add([string]$Object) }
+
+        pickFromList @('0123456789012345') { param($i) $i }
+
+        ($script:writes -join '|') | Should -Not -Match '0123456789012345'
+        ($script:writes -join '|') | Should -Match '…'
+    }
+
     It "Down then Up navigates, wrapping past the start" {
         $keys = [System.Collections.Generic.Queue[object]]::new()
         $keys.Enqueue([pscustomobject]@{Key = 'DownArrow'})
@@ -765,6 +832,48 @@ Describe "pickFromList" {
         $result = pickFromList @('a', 'b') { param($i) $i }
 
         $result | Should -Be 1
+    }
+}
+
+Describe "truncateLabel" {
+    It "returns the label unchanged when it fits" {
+        truncateLabel 'abc' 10 | Should -Be 'abc'
+    }
+
+    It "truncates and appends an ellipsis when over width, capped at the given width" {
+        $r = truncateLabel '0123456789' 5
+        $r        | Should -Be '0123…'
+        $r.Length | Should -Be 5
+    }
+
+    It "hard-truncates with no room for an ellipsis when width is 1" {
+        truncateLabel 'abcdef' 1 | Should -Be 'a'
+    }
+
+    It "returns an empty string when width is 0 or less" {
+        truncateLabel 'abcdef' 0  | Should -Be ''
+        truncateLabel 'abcdef' -1 | Should -Be ''
+    }
+}
+
+Describe "buildRowFields" {
+    It "leaves fields unchanged when the row fits the console width" {
+        $entry = [pscustomobject]@{planFile = 'C:/plans/a.md'; enterKind = 'fresh'; state = 'ready-to-plan'; nextStep = $null}
+
+        $f = buildRowFields $entry $false $false $false 10 20 200
+
+        $f.nameField  | Should -Match 'a\.md'
+        $f.crossField | Should -Be ''
+    }
+
+    It "truncates fields so the total row stays within the console width" {
+        $entry = [pscustomobject]@{planFile = 'C:/plans/a-very-long-plan-file-name-indeed.md'; enterKind = 'fresh'; state = 'ready-to-implement'; nextStep = $null}
+
+        $f = buildRowFields $entry $false $false $true 50 20 30
+
+        ($f.prefix.Length + $f.status.Length + $f.nameField.Length + $f.stateField.Length + $f.crossField.Length) |
+            Should -BeLessOrEqual 30
+        $f.nameField | Should -Match '…'
     }
 }
 
@@ -1050,9 +1159,9 @@ Describe "openProject" {
         @($entry.sessionIds)      | Should -Be @("sid-1")    # kept
     }
 
-    It "default picker selection: start-fresh for ready-to-plan, most recent otherwise" -TestCases @(
-        @{ State = 'ready-to-plan';      ExpectedInitial = 2 }   # after the 2 session rows
-        @{ State = 'ready-to-implement'; ExpectedInitial = 0 }
+    It "default picker selection: most recent for ready-to-plan, start-fresh for ready-to-implement" -TestCases @(
+        @{ State = 'ready-to-plan';      ExpectedInitial = 0 }
+        @{ State = 'ready-to-implement'; ExpectedInitial = 2 }   # after the 2 session rows
     ) {
         param($State, $ExpectedInitial)
         $plan  = newPlan "res-default-$State" $State
@@ -1102,6 +1211,20 @@ Describe "openProject" {
         @($script:pickerItems | Where-Object { $_.kind -eq 'session' }).info.sid | Should -Be @("sid-1", "sid-2", "sid-3")
         $script:launched.rest  | Should -Contain "sid-2"
         @($entry.sessionIds)   | Should -HaveCount 4    # not clobbered
+    }
+
+    It "picker title identifies the plan (filename and plan title)" {
+        $plan  = newPlan 'titled' 'ready-to-implement'
+        $entry = newEntry $plan @("sid-1")
+        $db    = newDb $entry
+        Mock getSessionInfos { @(newInfo 'sid-1' (Get-Date)) }
+        $script:pickerTitle = $null
+        Mock pickFromList { $script:pickerTitle = $title; return $null }
+
+        $null = openProject $db $entry @()
+
+        $script:pickerTitle | Should -Match ([regex]::Escape((Split-Path $plan -Leaf)))
+        $script:pickerTitle | Should -Match 'titled'
     }
 
     It "picker canceled: returns false without launching" {
@@ -1221,6 +1344,18 @@ Describe "openProject" {
         $freshRow.modelIndex               | Should -Be 2
     }
 
+    It "fresh row carries the entry's harness, so the label can name it" {
+        $plan  = newPlan 'harness-label' 'ready-to-implement'
+        $entry = newEntry $plan @() 'copilot'
+        $db    = newDb $entry
+        $script:pickerItems = $null
+        Mock pickFromList { $script:pickerItems = $items; return 0 }
+
+        openProject $db $entry @()
+
+        $script:pickerItems[0].harness | Should -Be 'copilot'
+    }
+
     It "picking a non-default model passes --model through to launchCl before the prompt" {
         $plan  = newPlan 'model-pick' 'ready-to-implement'
         $entry = newEntry $plan
@@ -1336,6 +1471,40 @@ Describe "getLaunchAction" {
         $a.kind     | Should -Be 'fresh'
         $a.prompt   | Should -Be 'Please do the next step in C:/p/x.md'
         $a.setState | Should -Be 'ready-to-implement'
+    }
+}
+
+Describe "getSessionPickerTitle" {
+    BeforeAll {
+        $script:titleRoot = ((New-Item -ItemType Directory "TestDrive:\picker-title").FullName -replace '\\', '/').TrimEnd('/')
+    }
+
+    It "combines the filename and the plan's heading" {
+        $path = "$script:titleRoot/foo.md"
+        Set-Content $path @("# Foo Plan", "", "## Step 1: x")
+
+        getSessionPickerTitle $path | Should -Be 'foo.md — Foo Plan'
+    }
+
+    It "falls back to just the filename when the plan has no heading" {
+        $path = "$script:titleRoot/bar.md"
+        Set-Content $path @("no heading here")
+
+        getSessionPickerTitle $path | Should -Be 'bar.md'
+    }
+}
+
+Describe "defaultsToFreshPicker" {
+    It "is true for ready-to-implement (its sessions are the spent planning ones)" {
+        defaultsToFreshPicker 'ready-to-implement' | Should -BeTrue
+    }
+
+    It "is false for ready-to-plan and code-complete (continue/approve the existing session)" -TestCases @(
+        @{ State = 'ready-to-plan' }
+        @{ State = 'code-complete' }
+    ) {
+        param($State)
+        defaultsToFreshPicker $State | Should -BeFalse
     }
 }
 
