@@ -190,7 +190,8 @@ exhaustive options) are still fine as AskUserQuestion.
   - wrap lines at 120 characters max. Break at natural phrase boundaries
     for readability (like this).
   - On wide tables, prepend them with `<!-- prettier-ignore -->`. Stops prettier from reflowing
-    them into less-readable shapes.
+    them into less-readable shapes. Table rows and fenced code blocks are exempt from the 120
+    limit — they can't be wrapped, and the checker deliberately skips them.
   - A PostToolUse hook flags over-limit lines after every edit — heed its findings. For bulk
     checks: `Find-LongMarkdownLines [-Path <file|dir>]` (prat tooling).
   - Headings can't be wrapped either (each `#`-prefixed line becomes its own separate heading) —
