@@ -600,6 +600,174 @@ Describe "getClExtraArgs" {
     }
 }
 
+Describe "getModelList" {
+    It "returns null when the model-list command is absent" {
+        Mock tryInvokeAgentModelList { $null }
+
+        getModelList 'claude' | Should -BeNullOrEmpty
+    }
+
+    It "returns null when the harness key is absent from the table" {
+        Mock tryInvokeAgentModelList { @{ claude = @{ small = @{ displayName = 'Haiku'; model = 'Haiku'; relativeCost = 1 } } } }
+
+        getModelList 'copilot' | Should -BeNullOrEmpty
+    }
+
+    It "returns a cost-sorted list with <default> appended" {
+        Mock tryInvokeAgentModelList {
+            @{ claude = @{
+                large  = @{ displayName = 'Opus';   model = 'Opus';   relativeCost = 5 }
+                small  = @{ displayName = 'Haiku';  model = 'Haiku';  relativeCost = 1 }
+                medium = @{ displayName = 'Sonnet'; model = 'Sonnet'; relativeCost = 3 }
+            } }
+        }
+
+        $list = getModelList 'claude'
+
+        @($list.displayName) | Should -Be @('Haiku', 'Sonnet', 'Opus', '<default>')
+        $list[-1].model      | Should -BeNullOrEmpty
+    }
+}
+
+Describe "cycleModelIndex" {
+    It "advances forward" {
+        cycleModelIndex 0 3 1 | Should -Be 1
+    }
+
+    It "wraps forward past the end" {
+        cycleModelIndex 2 3 1 | Should -Be 0
+    }
+
+    It "moves backward" {
+        cycleModelIndex 2 3 -1 | Should -Be 1
+    }
+
+    It "wraps backward past the start" {
+        cycleModelIndex 0 3 -1 | Should -Be 2
+    }
+}
+
+Describe "advanceFreshRowModel" {
+    It "advances the fresh row's model index, wrapping" {
+        $row = @{ kind = 'fresh'; modelList = @(1, 2, 3); modelIndex = 2 }
+
+        advanceFreshRowModel $row 1
+
+        $row.modelIndex | Should -Be 0
+    }
+
+    It "is a no-op for a session row" {
+        $row = @{ kind = 'session'; modelList = @(1, 2, 3); modelIndex = 0 }
+
+        advanceFreshRowModel $row 1
+
+        $row.modelIndex | Should -Be 0
+    }
+
+    It "is a no-op for a fresh row with no model list" {
+        $row = @{ kind = 'fresh' }
+
+        advanceFreshRowModel $row 1
+
+        $row.ContainsKey('modelIndex') | Should -BeFalse
+    }
+}
+
+Describe "getModelArgs" {
+    It "returns no args for a null model (<default>)" {
+        $r = getModelArgs $null
+        $r.Count | Should -Be 0
+    }
+
+    It "returns --model <name> for a chosen model" {
+        $r = getModelArgs 'Opus'
+        $r | Should -Be @('--model', 'Opus')
+    }
+}
+
+Describe "pickFromList" {
+    BeforeEach {
+        Mock Write-Host { }
+        Mock clearConsole { }
+    }
+
+    It "Left/Right are no-ops when no onHorizontal is supplied" {
+        $keys = [System.Collections.Generic.Queue[object]]::new()
+        $keys.Enqueue([pscustomobject]@{Key = 'LeftArrow'})
+        $keys.Enqueue([pscustomobject]@{Key = 'RightArrow'})
+        $keys.Enqueue([pscustomobject]@{Key = 'Enter'})
+        Mock readListKey { $keys.Dequeue() }
+
+        $result = pickFromList @('a', 'b') { param($i) $i }
+
+        $result | Should -Be 0
+    }
+
+    It "does not re-invoke the label function on Up/Down navigation (no wasted work for expensive labels)" {
+        $keys = [System.Collections.Generic.Queue[object]]::new()
+        $keys.Enqueue([pscustomobject]@{Key = 'DownArrow'})
+        $keys.Enqueue([pscustomobject]@{Key = 'UpArrow'})
+        $keys.Enqueue([pscustomobject]@{Key = 'Enter'})
+        Mock readListKey { $keys.Dequeue() }
+        $script:labelCalls = 0
+        $labelFn = { param($i) $script:labelCalls++; $i }
+
+        pickFromList @('a', 'b') $labelFn
+
+        $script:labelCalls | Should -Be 2   # once per item, computed once up front — not per render
+    }
+
+    It "invokes onHorizontal with the selected item and direction on Left/Right" {
+        $keys = [System.Collections.Generic.Queue[object]]::new()
+        $keys.Enqueue([pscustomobject]@{Key = 'RightArrow'})
+        $keys.Enqueue([pscustomobject]@{Key = 'Enter'})
+        Mock readListKey { $keys.Dequeue() }
+        $calls = [System.Collections.Generic.List[object]]::new()
+        $onHorizontal = { param($item, $direction) $calls.Add(@{item = $item; direction = $direction}) }
+        $item = @{ n = 'x' }
+
+        $result = pickFromList @($item) { param($i) $i.n } 'title' 0 $onHorizontal
+
+        $result             | Should -Be 0
+        $calls.Count        | Should -Be 1
+        $calls[0].direction | Should -Be 1
+    }
+
+    It "recomputes labels after an onHorizontal mutation, so it shows before Enter" {
+        $keys = [System.Collections.Generic.Queue[object]]::new()
+        $keys.Enqueue([pscustomobject]@{Key = 'RightArrow'})
+        $keys.Enqueue([pscustomobject]@{Key = 'Enter'})
+        Mock readListKey { $keys.Dequeue() }
+        $script:writes = [System.Collections.Generic.List[string]]::new()
+        Mock Write-Host { param($Object) $script:writes.Add([string]$Object) }
+        $item = [pscustomobject]@{ n = 0 }
+        $onHorizontal = { param($i, $d) $i.n += 1 }
+
+        pickFromList @($item) { param($i) "n=$($i.n)" } 'title' 0 $onHorizontal
+
+        ($script:writes -join '|') | Should -Match 'n=1'
+    }
+
+    It "Escape returns null" {
+        Mock readListKey { [pscustomobject]@{Key = 'Escape'} }
+
+        pickFromList @('a', 'b') { param($i) $i } | Should -BeNullOrEmpty
+    }
+
+    It "Down then Up navigates, wrapping past the start" {
+        $keys = [System.Collections.Generic.Queue[object]]::new()
+        $keys.Enqueue([pscustomobject]@{Key = 'DownArrow'})
+        $keys.Enqueue([pscustomobject]@{Key = 'UpArrow'})
+        $keys.Enqueue([pscustomobject]@{Key = 'UpArrow'})   # wraps to the last item
+        $keys.Enqueue([pscustomobject]@{Key = 'Enter'})
+        Mock readListKey { $keys.Dequeue() }
+
+        $result = pickFromList @('a', 'b') { param($i) $i }
+
+        $result | Should -Be 1
+    }
+}
+
 Describe "cleanStaleRunningFiles" {
     It "removes pid files whose pids are not live" {
         $rDir = "TestDrive:\clean-stale"
@@ -763,7 +931,8 @@ Describe "openProject" {
         Mock clearConsole { }
         Mock Read-Host { "" }
         Mock getSessionInfos { @() }
-        Mock pickFromList { }
+        Mock tryInvokeAgentModelList { $null }
+        Mock pickFromList { return 0 }   # selects the sole fresh row by default now that fresh launches route through the picker too
         $script:launched = $null
         $script:launchPrewriteSid = $null
         $script:launchPrewriteCwd = $null
@@ -1018,6 +1187,100 @@ Describe "openProject" {
         $script:launched.rest     | Should -Contain "--resume"
         $script:launched.rest     | Should -Contain "sid-1"
         $script:launchPrewriteSid | Should -Be 'sid-1'
+    }
+
+    It "no sessions: routes through the picker with a single fresh row (not a direct launch)" {
+        $plan  = newPlan 'fresh-picker' 'ready-to-implement'
+        $entry = newEntry $plan
+        $db    = newDb $entry
+        $script:pickerItems = $null
+        Mock pickFromList { $script:pickerItems = $items; return 0 }
+
+        $result = openProject $db $entry @()
+
+        $result                     | Should -BeTrue
+        @($script:pickerItems)      | Should -HaveCount 1
+        $script:pickerItems[0].kind | Should -Be 'fresh'
+    }
+
+    It "fresh row exposes a cost-sorted model list starting at <default> when the harness has one" {
+        $plan  = newPlan 'model-list' 'ready-to-implement'
+        $entry = newEntry $plan
+        $db    = newDb $entry
+        Mock tryInvokeAgentModelList { @{ claude = @{
+            small = @{ displayName = 'Haiku'; model = 'Haiku'; relativeCost = 1 }
+            large = @{ displayName = 'Opus';  model = 'Opus';  relativeCost = 5 }
+        } } }
+        $script:pickerItems = $null
+        Mock pickFromList { $script:pickerItems = $items; return 0 }
+
+        openProject $db $entry @()
+
+        $freshRow = $script:pickerItems[0]
+        @($freshRow.modelList.displayName) | Should -Be @('Haiku', 'Opus', '<default>')
+        $freshRow.modelIndex               | Should -Be 2
+    }
+
+    It "picking a non-default model passes --model through to launchCl before the prompt" {
+        $plan  = newPlan 'model-pick' 'ready-to-implement'
+        $entry = newEntry $plan
+        $db    = newDb $entry
+        Mock tryInvokeAgentModelList { @{ claude = @{
+            large = @{ displayName = 'Opus'; model = 'Opus'; relativeCost = 5 }
+        } } }
+        Mock pickFromList {
+            $items[0].modelIndex = 0   # cycle away from <default> to Opus
+            return 0
+        }
+
+        openProject $db $entry @()
+
+        $script:launched.rest[0] | Should -Be '--model'
+        $script:launched.rest[1] | Should -Be 'Opus'
+        $script:launched.rest[2] | Should -Be "Please do the next step in $plan"
+    }
+
+    It "picking the default model row omits --model" {
+        $plan  = newPlan 'model-default' 'ready-to-implement'
+        $entry = newEntry $plan
+        $db    = newDb $entry
+        Mock tryInvokeAgentModelList { @{ claude = @{
+            large = @{ displayName = 'Opus'; model = 'Opus'; relativeCost = 5 }
+        } } }
+        Mock pickFromList { return 0 }   # default initial selection is <default>
+
+        openProject $db $entry @()
+
+        $script:launched.rest[0] | Should -Be "Please do the next step in $plan"
+        $script:launched.rest    | Should -Not -Contain '--model'
+    }
+
+    It "session rows never carry a model field" {
+        $plan  = newPlan 'model-resume' 'ready-to-implement'
+        $entry = newEntry $plan @("sid-1")
+        $db    = newDb $entry
+        Mock getSessionInfos { @(newInfo 'sid-1' (Get-Date)) }
+        Mock tryInvokeAgentModelList { @{ claude = @{ large = @{ displayName = 'Opus'; model = 'Opus'; relativeCost = 5 } } } }
+        $script:pickerItems = $null
+        Mock pickFromList { $script:pickerItems = $items; return 0 }
+
+        openProject $db $entry @()
+
+        $script:pickerItems[0].kind                     | Should -Be 'session'
+        $script:pickerItems[0].ContainsKey('modelList') | Should -BeFalse
+    }
+
+    It "harness with no model list: fresh row has no model field and no --model arg" {
+        $plan  = newPlan 'model-none' 'ready-to-implement'
+        $entry = newEntry $plan
+        $db    = newDb $entry
+        $script:pickerItems = $null
+        Mock pickFromList { $script:pickerItems = $items; return 0 }
+
+        openProject $db $entry @()
+
+        $script:pickerItems[0].ContainsKey('modelList') | Should -BeFalse
+        $script:launched.rest[0] | Should -Be "Please do the next step in $plan"
     }
 }
 

@@ -244,41 +244,59 @@ function openProject($db, $entry, $liveSessionIds) {
     $action = getLaunchAction $state ($infos.Count -gt 0) $entry.planFile
     if ($action.setState) { $null = Set-PlanState -PlanFile $entry.planFile -State $action.setState }
 
-    if ($action.kind -eq 'resume') {
-        $rows = @($infos | Select-Object -First 3 | ForEach-Object { @{ kind = 'session'; info = $_ } })   # older sessions stay in the db, unshown
-        $rows += @{ kind = 'fresh' }
-        # Post-wrap planning usually wants a fresh session; mid-work states default to resuming.
-        $initial = if ($state -eq 'ready-to-plan') { $rows.Count - 1 } else { 0 }
-        $idx = pickFromList $rows {
-            param($r)
-            if ($r.kind -eq 'fresh') { '(start fresh session)' }
-            else { "$($r.info.lastActive.ToString('yyyy-MM-dd HH:mm'))  $($r.info.summary)" }
-        } 'Open plan' $initial
-        if ($null -eq $idx) { return $false }
-
-        if ($rows[$idx].kind -eq 'session') {
-            $picked = $rows[$idx].info
-            if ($entry.harness -eq 'claude') {
-                $script:launchPrewriteSid = $picked.sid
-                $script:launchPrewriteCwd = normalizePath $entry.cwd
-            }
-            $resumeArgs = getResumeArgs $entry.harness $picked.sid
-            $exitCode = launchCl $entry.harness $entry.cwd $entry.planFile @resumeArgs
-            if ($exitCode -ne 0) {
-                $entry.sessionIds = @($entry.sessionIds | Where-Object { $_ -ne $picked.sid })
-                saveDb $db $dbPath
-                clearConsole
-                Write-Host "Resume failed (cl exit $exitCode) — session $($picked.sid) dropped from this plan." -ForegroundColor Yellow
-                $null = Read-Host 'Press Enter to return'
-            }
-            return $true
-        }
-        # fresh row picked — fall through to the fresh launch below
+    # Every fresh launch goes through the picker (a single "(start fresh session)" row when there
+    # are no sessions), so the inline model field below is always reachable.
+    $freshRow = @{ kind = 'fresh' }
+    $modelList = getModelList $entry.harness
+    if ($modelList) {
+        # Start on <default> (the last entry) — no --model arg, matching today's behavior.
+        $freshRow.modelList  = $modelList
+        $freshRow.modelIndex = $modelList.Count - 1
     }
+
+    $rows = [System.Collections.Generic.List[object]]::new()
+    if ($action.kind -eq 'resume') {
+        foreach ($info in ($infos | Select-Object -First 3)) { $rows.Add(@{ kind = 'session'; info = $info }) }   # older sessions stay in the db, unshown
+    }
+    $rows.Add($freshRow)
+    # Post-wrap planning usually wants a fresh session; mid-work states default to resuming.
+    $initial = if ($action.kind -eq 'resume' -and $state -ne 'ready-to-plan') { 0 } else { $rows.Count - 1 }
+
+    $idx = pickFromList $rows {
+        param($r)
+        if ($r.kind -ne 'fresh') { return "$($r.info.lastActive.ToString('yyyy-MM-dd HH:mm'))  $($r.info.summary)" }
+        if (-not $r.modelList) { return '(start fresh session)' }
+        $choice     = $r.modelList[$r.modelIndex]
+        $modelLabel = if ($choice.model) { "$($choice.displayName)  (cost x$($choice.relativeCost))" } else { $choice.displayName }
+        return "(start fresh session)   model: $modelLabel  ‹ ›"
+    } 'Open plan' $initial { param($item, $direction) advanceFreshRowModel $item $direction }
+    if ($null -eq $idx) { return $false }
+
+    if ($rows[$idx].kind -eq 'session') {
+        $picked = $rows[$idx].info
+        if ($entry.harness -eq 'claude') {
+            $script:launchPrewriteSid = $picked.sid
+            $script:launchPrewriteCwd = normalizePath $entry.cwd
+        }
+        $resumeArgs = getResumeArgs $entry.harness $picked.sid
+        $exitCode = launchCl $entry.harness $entry.cwd $entry.planFile @resumeArgs
+        if ($exitCode -ne 0) {
+            $entry.sessionIds = @($entry.sessionIds | Where-Object { $_ -ne $picked.sid })
+            saveDb $db $dbPath
+            clearConsole
+            Write-Host "Resume failed (cl exit $exitCode) — session $($picked.sid) dropped from this plan." -ForegroundColor Yellow
+            $null = Read-Host 'Press Enter to return'
+        }
+        return $true
+    }
+
+    # fresh row picked
+    $freshModel = if ($rows[$idx].modelList) { $rows[$idx].modelList[$rows[$idx].modelIndex].model } else { $null }
+    $modelArgs  = getModelArgs $freshModel
 
     $entry.cwd = normalizePath $PWD.Path
     saveDb $db $dbPath
-    $exitCode = launchCl $entry.harness $entry.cwd $entry.planFile $action.prompt
+    $exitCode = launchCl $entry.harness $entry.cwd $entry.planFile @modelArgs $action.prompt
     showLaunchError $exitCode
     return $true
 }
@@ -372,6 +390,7 @@ function launchCl([string] $harness, [string] $cwd, [string] $planFile) {
 
 function clearConsole { [Console]::Clear() }    # thin wrapper so tests can mock it
 function readStateKey  { [Console]::ReadKey($true) }  # thin wrapper so tests can mock it
+function readListKey   { [Console]::ReadKey($true) }  # thin wrapper so tests can mock it
 
 function showLaunchError([int] $exitCode) {
     # Note: no console clear here — cl's own output is already visible; clearing would erase it.
@@ -525,12 +544,15 @@ function registerProject($db, $orphans, $liveSessionIds, $sessionHarness = @{}) 
     saveDb $db $dbPath
 }
 
-function pickFromList($items, $labelFn, $title, [int] $initialSelected = 0) {
+# $onHorizontal (optional): called as `& $onHorizontal $items[$selected] $direction` (+1/-1) on
+# Left/Right, to mutate the selected item in place — e.g. cycling a field shown in its label.
+# Callers that don't pass it get Left/Right as no-ops.
+function pickFromList($items, $labelFn, $title, [int] $initialSelected = 0, $onHorizontal = $null) {
+    $selected = [Math]::Min([Math]::Max(0, $initialSelected), @($items).Count - 1)
     $labels   = @($items | ForEach-Object { & $labelFn $_ })
-    $selected = [Math]::Min([Math]::Max(0, $initialSelected), $labels.Count - 1)
 
     while ($true) {
-        [Console]::Clear()
+        clearConsole
         Write-Host "  $title" -ForegroundColor Cyan
         Write-Host ''
         for ($i = 0; $i -lt $labels.Count; $i++) {
@@ -541,12 +563,17 @@ function pickFromList($items, $labelFn, $title, [int] $initialSelected = 0) {
         Write-Host ''
         Write-Host '  [↑↓] navigate  [Enter] select  [Esc] cancel' -ForegroundColor DarkCyan
 
-        $key = [Console]::ReadKey($true)
+        $key = readListKey
         switch ($key.Key) {
-            'UpArrow'   { $selected = if ($selected -gt 0) { $selected - 1 } else { [Math]::Max(0, $labels.Count - 1) } }
-            'DownArrow' { $selected = if ($selected -lt ($labels.Count - 1)) { $selected + 1 } else { 0 } }
-            'Enter'     { return $selected }
-            'Escape'    { return $null }
+            'UpArrow'    { $selected = if ($selected -gt 0) { $selected - 1 } else { [Math]::Max(0, $labels.Count - 1) } }
+            'DownArrow'  { $selected = if ($selected -lt ($labels.Count - 1)) { $selected + 1 } else { 0 } }
+            # Labels are only re-derived here, after a mutation — not on every render — so callers
+            # whose label function does real work (e.g. openUntracked's file-reading getPlanTitle)
+            # don't pay for it on every Up/Down keystroke, only when something actually changed.
+            'LeftArrow'  { if ($onHorizontal) { & $onHorizontal $items[$selected] -1; $labels = @($items | ForEach-Object { & $labelFn $_ }) } }
+            'RightArrow' { if ($onHorizontal) { & $onHorizontal $items[$selected] 1; $labels = @($items | ForEach-Object { & $labelFn $_ }) } }
+            'Enter'      { return $selected }
+            'Escape'     { return $null }
         }
     }
 }
@@ -672,6 +699,51 @@ function getClExtraArgs([string] $harness, $userArgs) {
 function getResumeArgs([string] $harness, [string] $sid) {
     if ($harness -eq 'claude') { return ,@('--resume', $sid) }
     return ,@("--resume=$sid")
+}
+
+# --- Model picker ---
+
+# Thin wrapper over the optional de-specific model list command (mockable in tests). Bare-name
+# invocation, same pattern as Get-DefaultHarness: non-de users and unlisted harnesses see no
+# command on PATH, so this returns $null rather than throwing.
+function tryInvokeAgentModelList {
+    $cmd = Get-Command Get-AgentModelList -ErrorAction SilentlyContinue
+    if (-not $cmd) { return $null }
+    return & Get-AgentModelList
+}
+
+# Cost-sorted model choices for $harness, plus a trailing <default> (model = $null — "no --model
+# arg, let the harness apply its own default"). $null when the list command is absent or doesn't
+# cover this harness — callers then skip the model field entirely.
+function getModelList([string] $harness) {
+    $table = tryInvokeAgentModelList
+    if (-not $table -or -not $table.ContainsKey($harness)) { return $null }
+    $list = [System.Collections.Generic.List[object]]::new()
+    foreach ($e in ($table[$harness].GetEnumerator() | Sort-Object { $_.Value.relativeCost })) {
+        $list.Add([pscustomobject]@{ displayName = $e.Value.displayName; model = $e.Value.model; relativeCost = $e.Value.relativeCost })
+    }
+    $list.Add([pscustomobject]@{ displayName = '<default>'; model = $null; relativeCost = $null })
+    return ,$list
+}
+
+# Wrapping Left(-1)/Right(+1) step through a model list's indices.
+function cycleModelIndex([int] $index, [int] $count, [int] $direction) {
+    if ($count -le 0) { return 0 }
+    return (($index + $direction) % $count + $count) % $count
+}
+
+# pickFromList's $onHorizontal for the fresh row: no-op for session rows and for a fresh row with
+# no model list (harness/environment fallback); otherwise advances $row.modelIndex in place.
+function advanceFreshRowModel($row, [int] $direction) {
+    if ($row.kind -eq 'fresh' -and $row.modelList) {
+        $row.modelIndex = cycleModelIndex $row.modelIndex $row.modelList.Count $direction
+    }
+}
+
+# <default> (a null model) contributes no --model arg; any other model becomes @('--model', $model).
+function getModelArgs([string] $model) {
+    if ($model) { return ,@('--model', $model) }
+    return ,@()
 }
 
 function resolveSessionIds($entries, [string] $rDir, $livePids) {
