@@ -584,19 +584,19 @@ Describe "getResumeArgs" {
 }
 
 Describe "getClExtraArgs" {
-    It "claude prepends -CC" {
+    It "claude prepends -Harness:claude" {
         $r = getClExtraArgs 'claude' @('a', 'b')
-        $r | Should -Be @('-CC', 'a', 'b')
+        $r | Should -Be @('-Harness:claude', 'a', 'b')
     }
 
-    It "copilot leaves args unchanged" {
+    It "copilot prepends -Harness:copilot" {
         $r = getClExtraArgs 'copilot' @('a', 'b')
-        $r | Should -Be @('a', 'b')
+        $r | Should -Be @('-Harness:copilot', 'a', 'b')
     }
 
-    It "claude with no user args yields just -CC" {
+    It "claude with no user args yields just -Harness:claude" {
         $r = getClExtraArgs 'claude' @()
-        $r | Should -Be @('-CC')
+        $r | Should -Be @('-Harness:claude')
     }
 }
 
@@ -1402,6 +1402,7 @@ Describe "openUntracked" {
         Mock Read-Host { "" }
         Mock clearConsole { }
         Mock getPlansDir { return $script:untrackedRoot }
+        Mock Get-DefaultHarness { return 'claude' }
         Mock getSessionInfos { @() }
         Mock pickFromList { return 0 }
         $script:launched = $null
@@ -1459,7 +1460,7 @@ Describe "openUntracked" {
         $result         | Should -BeTrue
         $db.Count       | Should -Be 1
         $db[0].planFile | Should -Be $plan
-        $db[0].harness  | Should -Be 'copilot'
+        $db[0].harness  | Should -Be 'claude'
         $script:launched.rest[0] | Should -Be "Please plan the next step in $plan"
         Should -Invoke saveDb -Times 1
     }
