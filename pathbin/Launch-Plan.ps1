@@ -262,6 +262,17 @@ function getLaunchAction([string] $state, [bool] $hasResumableSessions, [string]
     return @{ kind = $kind; prompt = $prompt; setState = $null }
 }
 
+# claude carries no identifying info on its own process command line, so pl must supply a session
+# id for a fresh launch to be detectable there; copilot's own launcher already does this, so this
+# is a no-op for any other harness. Mutates $entry.sessionIds so the new session is tracked
+# immediately, without waiting for the next command-line scan.
+function getFreshSessionArgs([string] $harness, $entry) {
+    if ($harness -ne 'claude') { return ,@() }
+    $sid = [guid]::NewGuid().ToString()
+    $entry.sessionIds = @($entry.sessionIds) + @($sid)
+    return ,@('--session-id', $sid)
+}
+
 # ready-to-implement's sessions are the spent planning ones, so the picker defaults to a fresh
 # session there; ready-to-plan and code-complete default to continuing/approving the existing one.
 function defaultsToFreshPicker([string] $state) {
@@ -335,12 +346,13 @@ function openProject($db, $entry, $liveSessionIds) {
     }
 
     # fresh row picked
-    $freshModel = if ($rows[$idx].modelList) { $rows[$idx].modelList[$rows[$idx].modelIndex].model } else { $null }
-    $modelArgs  = getModelArgs $freshModel
+    $freshModel  = if ($rows[$idx].modelList) { $rows[$idx].modelList[$rows[$idx].modelIndex].model } else { $null }
+    $modelArgs   = getModelArgs $freshModel
+    $sessionArgs = getFreshSessionArgs $entry.harness $entry
 
     $entry.cwd = normalizePath $PWD.Path
     saveDb $db $dbPath
-    $exitCode = launchCl $entry.harness $entry.cwd $entry.planFile @modelArgs $action.prompt
+    $exitCode = launchCl $entry.harness $entry.cwd $entry.planFile @modelArgs @sessionArgs $action.prompt
     showLaunchError $exitCode
     return $true
 }

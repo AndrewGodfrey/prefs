@@ -1067,7 +1067,7 @@ Describe "openProject" {
 
         $result                   | Should -BeTrue
         $script:launched.planFile | Should -Be $plan
-        $script:launched.rest[0]  | Should -Be "Please do the next step in $plan"
+        $script:launched.rest[-1] | Should -Be "Please do the next step in $plan"
     }
 
     It "ready-to-plan + no sessions: fresh launch with plan-the-next-step prompt" {
@@ -1077,7 +1077,7 @@ Describe "openProject" {
 
         openProject $db $entry @()
 
-        $script:launched.rest[0] | Should -Be "Please plan the next step in $plan"
+        $script:launched.rest[-1] | Should -Be "Please plan the next step in $plan"
     }
 
     It "code-complete + no sessions: fresh launch with review prompt" {
@@ -1087,8 +1087,8 @@ Describe "openProject" {
 
         openProject $db $entry @()
 
-        $script:launched.rest[0] | Should -Match 'code-complete'
-        $script:launched.rest[0] | Should -Match 'review'
+        $script:launched.rest[-1] | Should -Match 'code-complete'
+        $script:launched.rest[-1] | Should -Match 'review'
     }
 
     It "no frontmatter: treated as ready-to-plan" {
@@ -1098,7 +1098,7 @@ Describe "openProject" {
 
         openProject $db $entry @()
 
-        $script:launched.rest[0] | Should -Be "Please plan the next step in $plan"
+        $script:launched.rest[-1] | Should -Be "Please plan the next step in $plan"
     }
 
     It "fresh launch: updates cwd and saves db" {
@@ -1122,8 +1122,8 @@ Describe "openProject" {
 
         $result                               | Should -BeTrue
         (Get-PlanState -PlanFile $plan).State | Should -Be 'ready-to-implement'
-        $script:launched.rest[0]              | Should -Be "Please do the next step in $plan"
-        @($entry.sessionIds)                  | Should -Be @("old-sid")
+        $script:launched.rest[-1]             | Should -Be "Please do the next step in $plan"
+        @($entry.sessionIds)                  | Should -Contain "old-sid"   # kept, alongside the new fresh session id
     }
 
     It "one resumable session: picker offers the session plus a start-fresh row" {
@@ -1154,9 +1154,9 @@ Describe "openProject" {
         $result = openProject $db $entry @()
 
         $result                   | Should -BeTrue
-        $script:launched.rest[0]  | Should -Be "Please do the next step in $plan"
+        $script:launched.rest[-1] | Should -Be "Please do the next step in $plan"
         $script:launched.rest     | Should -Not -Contain "--resume"
-        @($entry.sessionIds)      | Should -Be @("sid-1")    # kept
+        @($entry.sessionIds)      | Should -Contain "sid-1"   # kept, alongside the new fresh session id
     }
 
     It "default picker selection: most recent for ready-to-plan, start-fresh for ready-to-implement" -TestCases @(
@@ -1247,7 +1247,7 @@ Describe "openProject" {
 
         openProject $db $entry @()
 
-        $script:launched.rest[0] | Should -Be "Please do the next step in $plan"
+        $script:launched.rest[-1] | Should -Be "Please do the next step in $plan"
     }
 
     It "failed resume: removes only the failed sid, keeps the rest, returns true" {
@@ -1370,9 +1370,9 @@ Describe "openProject" {
 
         openProject $db $entry @()
 
-        $script:launched.rest[0] | Should -Be '--model'
-        $script:launched.rest[1] | Should -Be 'Opus'
-        $script:launched.rest[2] | Should -Be "Please do the next step in $plan"
+        $script:launched.rest[0]  | Should -Be '--model'
+        $script:launched.rest[1]  | Should -Be 'Opus'
+        $script:launched.rest[-1] | Should -Be "Please do the next step in $plan"
     }
 
     It "picking the default model row omits --model" {
@@ -1386,8 +1386,8 @@ Describe "openProject" {
 
         openProject $db $entry @()
 
-        $script:launched.rest[0] | Should -Be "Please do the next step in $plan"
-        $script:launched.rest    | Should -Not -Contain '--model'
+        $script:launched.rest[-1] | Should -Be "Please do the next step in $plan"
+        $script:launched.rest     | Should -Not -Contain '--model'
     }
 
     It "session rows never carry a model field" {
@@ -1415,7 +1415,7 @@ Describe "openProject" {
         openProject $db $entry @()
 
         $script:pickerItems[0].ContainsKey('modelList') | Should -BeFalse
-        $script:launched.rest[0] | Should -Be "Please do the next step in $plan"
+        $script:launched.rest[-1] | Should -Be "Please do the next step in $plan"
     }
 }
 
@@ -1491,6 +1491,27 @@ Describe "getSessionPickerTitle" {
         Set-Content $path @("no heading here")
 
         getSessionPickerTitle $path | Should -Be 'bar.md'
+    }
+}
+
+Describe "getFreshSessionArgs" {
+    It "generates a --session-id, returns it, and appends it to entry.sessionIds" {
+        $entry = [pscustomobject]@{ sessionIds = @() }
+
+        $args = getFreshSessionArgs 'claude' $entry
+
+        $args[0] | Should -Be '--session-id'
+        $args[1] | Should -Match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+        $entry.sessionIds | Should -Contain $args[1]
+    }
+
+    It "returns no args and leaves sessionIds untouched for a non-claude harness (its own launcher supplies one)" {
+        $entry = [pscustomobject]@{ sessionIds = @('existing') }
+
+        $args = getFreshSessionArgs 'copilot' $entry
+
+        @($args).Count    | Should -Be 0
+        @($entry.sessionIds) | Should -Be @('existing')
     }
 }
 
@@ -1893,7 +1914,7 @@ Describe "openUntracked" {
         $db.Count       | Should -Be 1
         $db[0].planFile | Should -Be $plan
         $db[0].harness  | Should -Be 'claude'
-        $script:launched.rest[0] | Should -Be "Please plan the next step in $plan"
+        $script:launched.rest[-1] | Should -Be "Please plan the next step in $plan"
         Should -Invoke saveDb -Times 1
     }
 
@@ -1905,7 +1926,7 @@ Describe "openUntracked" {
         $result = openUntracked $db
 
         $result | Should -BeTrue
-        $script:launched.rest[0] | Should -Be "Please do the next step in $plan"
+        $script:launched.rest[-1] | Should -Be "Please do the next step in $plan"
     }
 
     It "returns true even when cl fails (TUI refreshes)" {
