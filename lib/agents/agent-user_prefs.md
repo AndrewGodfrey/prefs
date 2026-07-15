@@ -185,6 +185,7 @@ exhaustive options) are still fine as AskUserQuestion.
 
 ## Style
 
+- Avoid corporate-jargon word choices in prose (e.g. "learnings" → "lessons").
 - Markdown files: 
   - wrap lines at 120 characters max. Break at natural phrase boundaries
     for readability (like this).
