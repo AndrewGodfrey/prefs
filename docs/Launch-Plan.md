@@ -15,8 +15,7 @@ Plan tracking is split across three ledgers with different owners:
    - `next-step` — step id + brief label;
    - `refined` — steps *beyond* the pointer already planned to implementable detail.
 2. **Launcher db (`~/prat/auto/context/db.json`)** — machine-local session association only: which sessions
-   belong to which plan, plus a launch cwd and harness. Maintained by hooks + the launcher; agents never
-   touch it.
+   belong to which plan, plus a launch cwd and harness. Maintained entirely by the launcher.
 3. **User agreement ledger** — never in the plan file. Step granularity: the move to `_done.md` (via
    `/wrap`, which only runs on user approval). Hunk granularity: the user's git staging area. Checkboxes in
    the plan file are agent claims, never user agreement.
@@ -41,7 +40,8 @@ stay in `sessionIds`, they just stop auto-resuming.
 
 ## Main view
 
-One row per db entry: status marker, plan filename, frontmatter state. The marker shows what Enter will do:
+One row per db entry: status marker, plan filename, frontmatter state (`<state>: <next-step>` when a
+pointer is set, else the bare state, else `-`). The marker shows what Enter will do:
 
 - `[live]` — a session for this plan is running now; Enter is blocked (pl can't switch focus to it)
 - `[resume]` — Enter opens the session picker
