@@ -92,10 +92,6 @@ On the other hand: You are free to create or edit any file that isn't .gitignore
 I am monitoring. (That's typically prat, prefs, de, and whichever repo we're working on if that's separate).
 I will see those.
 
-Then again: files agents create under gitignored directories are a problem — fork.dev doesn't surface
-those (unlike untracked files, which it shows clearly), so messes there can go unnoticed for a long
-time. I'll find a better solution, but for now: please announce any you create (coarse-grained is fine).
-
 ### Interruptions and sync points
 
 Model 1 interruption as ~30 minutes of my work — humans don't context-switch well. Any turn I must
