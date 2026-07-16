@@ -1651,7 +1651,7 @@ Describe "getPlanTitle" {
     }
 
     It "skips a frontmatter block and finds the heading after it" {
-        Set-Content "TestDrive:\title5.md" @("---", "state: ready-to-plan", "---", "# Real Title")
+        Set-Content "TestDrive:\title5.md" @("---", "current-step:", "  state: ready-to-plan", "---", "# Real Title")
         getPlanTitle (Get-Item "TestDrive:\title5.md").FullName | Should -Be 'Real Title'
     }
 
