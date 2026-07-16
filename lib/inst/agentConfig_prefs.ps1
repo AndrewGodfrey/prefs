@@ -18,3 +18,4 @@ if ($Config.deRepoRoot) {
 }
 
 $installationTracker.EndStage($stage)
+# OmitFromCoverageReport: pure orchestration/file I/O, not worth the mocking cost

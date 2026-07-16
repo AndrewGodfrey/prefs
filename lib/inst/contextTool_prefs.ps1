@@ -8,3 +8,4 @@ Install-Folder $stage "$home\prat\auto\context"
 Install-Folder $stage "$home\prat\auto\context\running"
 
 $installationTracker.EndStage($stage)
+# OmitFromCoverageReport: pure orchestration, not worth the mocking cost

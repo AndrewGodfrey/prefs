@@ -42,3 +42,4 @@ Check "Enable moved block detection"
         }
     }
 }
+# OmitFromCoverageReport: pure orchestration/glue code around package installs, not worth the mocking cost

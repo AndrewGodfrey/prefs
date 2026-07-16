@@ -15,3 +15,4 @@ if (!($stage.GetIsStepComplete("powershell\updatehelp"))) {
 }
 
 $installationTracker.EndStage($stage)
+# OmitFromCoverageReport: pure orchestration, not worth the mocking cost

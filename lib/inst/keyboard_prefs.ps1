@@ -48,3 +48,4 @@ if ($stage.DidUpdate()) {
 }
 
 $installationTracker.EndStage($stage)
+# OmitFromCoverageReport: value-selection branch tightly coupled to registry I/O, not worth the mocking cost

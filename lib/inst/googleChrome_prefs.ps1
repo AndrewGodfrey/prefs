@@ -7,3 +7,4 @@ if ("chrome/install" -notin $Suppress) {
 
     $installationTracker.EndStage($stage)
 }
+# OmitFromCoverageReport: pure orchestration, not worth the mocking cost

@@ -44,3 +44,4 @@ Install-RegistryBinaryValue $stage $pmRoot 'Filter#Registry writes' $regWrites
 Install-RegistryBinaryValue $stage $pmRoot 'Filter#Word Registry writes' $wordRegWrites
 
 $installationTracker.EndStage($stage)
+# OmitFromCoverageReport: a unit test would just restate it - static filter data plus registry writes

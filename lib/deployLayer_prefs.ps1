@@ -38,3 +38,4 @@ try {
 } finally {
     if ($null -ne $it) { $it.StopInstallation() }
 }
+# OmitFromCoverageReport: pure orchestration, not worth the mocking cost

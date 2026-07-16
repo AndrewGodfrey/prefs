@@ -17,3 +17,4 @@ if ($stage.DidUpdate()) {
 }
 
 $installationTracker.EndStage($stage)
+# OmitFromCoverageReport: a unit test would just restate it - single registry write, no logic

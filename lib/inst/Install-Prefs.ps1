@@ -17,3 +17,4 @@ if (!(Test-Path "$home/prefs")) {
     Write-Host -ForegroundColor Green "Install-Prefs.ps1: Clone prefs"
     git clone https://github.com/AndrewGodfrey/prefs.git $home/prefs
 }
+# OmitFromCoverageReport: pure orchestration, not worth the mocking cost
