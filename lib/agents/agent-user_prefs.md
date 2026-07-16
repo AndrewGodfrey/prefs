@@ -30,7 +30,11 @@ reader might conflate — "inferred, not verified" is fine if the emphasis is im
 When flagging an open or blocking item in a status update (e.g. "still an open [USER] decision"),
 restate the actual substance of the question, not just a compressed label plus a role tag. A
 `[USER]`/`[AGENT]` tag in a plan is a plan-authoring convention marking who does a step — it's not
-a substitute for content in a conversational summary.
+a substitute for content in a conversational summary. If the item genuinely blocks further progress
+(e.g. a plan step can't close until it's resolved), raise it via AskUserQuestion rather than a
+trailing sentence appended to an otherwise-"done"-sounding response — a question embedded in prose
+after completed work reads as commentary and gets skimmed past, which is how a state advance ends
+up attempted while the question is still open.
 
 ## Workflow preferences
 
