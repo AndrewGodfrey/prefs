@@ -31,6 +31,16 @@ Describe "claude-statusline" {
             CallRlDisplay 90 200 | Should -Match '\[38;2;255;120;0m'
         }
 
+        # usedPct=100 — completely out, takes priority over the pace calc regardless of minsLeft
+        It "red (completely out) when usedPct >= 100" {
+            CallRlDisplay 100 120 | Should -Match '\[38;2;220;50;50m'
+        }
+
+        # usedPct=35, minsLeft=200: elapsedMins=100, elapsedPct=33.3%; minsToExhaust=65*100/35=185.7 min → yellow-green
+        It "yellow-green when ahead of pace and minsToExhaust >= yellowThreshold" {
+            CallRlDisplay 35 200 | Should -Match '\[38;2;140;185;35m'
+        }
+
         # elapsedMins=2 ≤ 5 — guard clause, no warning even at 90% used
         It "no warning when elapsed <= 5 minutes" {
             CallRlDisplay 90 298 | Should -Not -Match '\[38;2;'
@@ -75,6 +85,93 @@ Describe "claude-statusline" {
         }
     }
 
+    Context "Get-ContextBar" {
+        It "computes bar fill from context_window.used_percentage" {
+            Get-ContextBar @{ context_window = @{ used_percentage = 50 } } | Should -Be '▰▰▰▱▱'
+        }
+
+        It "falls back to current_context_used_percentage (Copilot CLI shape)" {
+            Get-ContextBar @{ current_context_used_percentage = 50 } | Should -Be '▰▰▰▱▱'
+        }
+
+        It "shows empty bar when neither field is present" {
+            Get-ContextBar @{} | Should -Be '▱▱▱▱▱'
+        }
+
+        It "caps at 5 filled bars" {
+            Get-ContextBar @{ context_window = @{ used_percentage = 100 } } | Should -Be '▰▰▰▰▰'
+        }
+    }
+
+    Context "Get-RateLimitBarString" {
+        It "returns empty string when rate_limits is absent" {
+            Get-RateLimitBarString $null $script:now | Should -Be ''
+        }
+
+        It "returns empty string when no window produces a display" {
+            Get-RateLimitBarString @{ five_hour = (MakeWindow 50 10) } $script:now | Should -Be ''
+        }
+
+        It "prefixes with a leading space when at least one window has a display" {
+            Get-RateLimitBarString @{ five_hour = (MakeWindow 50 120) } $script:now | Should -Match '^ 5h:'
+        }
+
+        It "joins both windows with a space when both produce a display" {
+            $result = Get-RateLimitBarString @{ five_hour = (MakeWindow 50 120); seven_day = (MakeWindow 50 5000) } $script:now
+            $result | Should -Match '5h:.*7d:'
+        }
+    }
+
+    Context "Format-LocationString" {
+        It "shows the raw cwd when no project is resolved" {
+            Format-LocationString $null 'C:\some\path' | Should -Be ' C:\some\path'
+        }
+
+        It "shows [id] with no suffix when project has no subdir or buildKind" {
+            Format-LocationString @{ id = 'MyRepo' } 'C:\x' | Should -Be ' [myrepo]'
+        }
+
+        It "includes buildKind and subdir when present" {
+            Format-LocationString @{ id = 'MyRepo'; subdir = 'sub\dir'; buildKind = 'Debug' } 'C:\x' |
+                Should -Be ' [myrepo](Debug) sub/dir/'
+        }
+    }
+
+    Context "Get-StatusLineString" {
+        It "shows the sandbox warning marker when CL_SANDBOX_MODE is not '1'" {
+            $prev = $env:CL_SANDBOX_MODE
+            try {
+                Remove-Item Env:\CL_SANDBOX_MODE -ErrorAction SilentlyContinue
+                Get-StatusLineString @{ cwd = $env:TEMP } $script:now -NoCwd | Should -Match '\*'
+            } finally {
+                if ($null -ne $prev) { $env:CL_SANDBOX_MODE = $prev } else { Remove-Item Env:\CL_SANDBOX_MODE -ErrorAction SilentlyContinue }
+            }
+        }
+
+        It "hides the sandbox warning marker when CL_SANDBOX_MODE is '1'" {
+            $prev = $env:CL_SANDBOX_MODE
+            try {
+                $env:CL_SANDBOX_MODE = '1'
+                Get-StatusLineString @{ cwd = $env:TEMP } $script:now -NoCwd | Should -Not -Match '\*'
+            } finally {
+                if ($null -ne $prev) { $env:CL_SANDBOX_MODE = $prev } else { Remove-Item Env:\CL_SANDBOX_MODE -ErrorAction SilentlyContinue }
+            }
+        }
+
+        It "shows the model name when present" {
+            Get-StatusLineString @{ cwd = $env:TEMP; model = @{ display_name = 'Sonnet 5' } } $script:now -NoCwd |
+                Should -Match '\s{3}\(Sonnet 5\)'
+        }
+
+        It "omits the model segment when absent" {
+            Get-StatusLineString @{ cwd = $env:TEMP } $script:now -NoCwd | Should -Not -Match '\('
+        }
+
+        It "omits location when -NoCwd is set" {
+            Get-StatusLineString @{ cwd = 'C:\should-not-appear' } $script:now -NoCwd | Should -Not -Match 'should-not-appear'
+        }
+    }
+
     Context "subprocess smoke test" {
         It "produces output when run with -NoProfile" {
             $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
@@ -95,8 +192,7 @@ Describe "claude-statusline" {
             New-Item -ItemType Directory -Path $jsonCwd, $launchCwd -Force | Out-Null
             try {
                 $env:CL_LAUNCH_CWD = $launchCwd
-                $json = @{ context_window = @{ used_percentage = 10 }; cwd = $jsonCwd } | ConvertTo-Json
-                $out  = ($json | pwsh -NoProfile -File "$PSScriptRoot/agent-statusline.ps1") -join ''
+                $out = Get-StatusLineString @{ cwd = $jsonCwd } $script:now
                 $out | Should -Match ([regex]::Escape($launchCwd))
                 $out | Should -Not -Match ([regex]::Escape($jsonCwd))
             } finally {
@@ -110,8 +206,7 @@ Describe "claude-statusline" {
             New-Item -ItemType Directory -Path $jsonCwd -Force | Out-Null
             try {
                 Remove-Item Env:\CL_LAUNCH_CWD -ErrorAction SilentlyContinue
-                $json = @{ context_window = @{ used_percentage = 10 }; cwd = $jsonCwd } | ConvertTo-Json
-                $out  = ($json | pwsh -NoProfile -File "$PSScriptRoot/agent-statusline.ps1") -join ''
+                $out = Get-StatusLineString @{ cwd = $jsonCwd } $script:now
                 $out | Should -Match ([regex]::Escape($jsonCwd))
             } finally {
                 Remove-Item $jsonCwd -Recurse -Force -ErrorAction SilentlyContinue
@@ -123,8 +218,7 @@ Describe "claude-statusline" {
         It "shows the plan name (no extension) when CL_PLAN_FILE is set" {
             try {
                 $env:CL_PLAN_FILE = 'C:/plans/myplan-upgrade.md'
-                $json = @{ context_window = @{ used_percentage = 10 }; cwd = $env:TEMP } | ConvertTo-Json
-                $out  = ($json | pwsh -NoProfile -File "$PSScriptRoot/agent-statusline.ps1") -join ''
+                $out = Get-StatusLineString @{ cwd = $env:TEMP } $script:now -NoCwd
                 $out | Should -Match 'myplan-upgrade'
                 $out | Should -Not -Match 'myplan-upgrade\.md'
             } finally {
@@ -134,16 +228,14 @@ Describe "claude-statusline" {
 
         It "shows no plan segment when CL_PLAN_FILE is unset" {
             Remove-Item Env:\CL_PLAN_FILE -ErrorAction SilentlyContinue
-            $json = @{ context_window = @{ used_percentage = 10 }; cwd = $env:TEMP } | ConvertTo-Json
-            $out  = ($json | pwsh -NoProfile -File "$PSScriptRoot/agent-statusline.ps1") -join ''
+            $out = Get-StatusLineString @{ cwd = $env:TEMP } $script:now -NoCwd
             $out | Should -Not -Match 'plan:'
         }
     }
 
     Context "no rate limits" {
         It "no rl section when rate_limits absent" {
-            $json = @{ context_window = @{ used_percentage = 10 }; cwd = $env:TEMP } | ConvertTo-Json
-            $out = ($json | pwsh -NoProfile -File "$PSScriptRoot/agent-statusline.ps1") -join ''
+            $out = Get-StatusLineString @{ cwd = $env:TEMP } $script:now -NoCwd
             $out | Should -Not -Match '5h:|7d:'
         }
     }

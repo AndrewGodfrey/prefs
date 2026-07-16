@@ -36,14 +36,10 @@ function Get-RateLimitDisplay($window, $label, $barWidth, $totalMins, $yellowThr
     "${color}${label}:$rlBar $timeStr${creset}"
 }
 
-if ($MyInvocation.InvocationName -ne '.') {
-    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-    $j = [Console]::In.ReadToEnd() | ConvertFrom-Json
-
-    # 5-bar context indicator
-    # Claude Code sends context_window.used_percentage; Copilot CLI sends current_context_used_percentage (top-level).
-    # $fixedPct: system prompt + tools + mandatory memory files — not in user's control (~8%). Recheck periodically.
-    # $bufferPct: autocompact buffer (~16.5%). Recheck periodically.
+# Claude Code sends context_window.used_percentage; Copilot CLI sends current_context_used_percentage (top-level).
+# $fixedPct: system prompt + tools + mandatory memory files — not in user's control (~8%). Recheck periodically.
+# $bufferPct: autocompact buffer (~16.5%). Recheck periodically.
+function Get-ContextBar($j) {
     $fixedPct  = 8.0
     $bufferPct = 16.5
     $usablePct = 100 - $fixedPct - $bufferPct   # 75.5% — the range from session-start to autocompact
@@ -52,34 +48,42 @@ if ($MyInvocation.InvocationName -ne '.') {
                  else { 0 }
     $consumed  = [math]::Max(0, $rawPct - $fixedPct)
     $bars      = if ($usablePct -gt 0) { [math]::Min(5, [math]::Round($consumed / $usablePct * 5)) } else { 5 }
-    $bar       = ([string]'▰' * $bars) + ([string]'▱' * (5 - $bars))
+    ([string]'▰' * $bars) + ([string]'▱' * (5 - $bars))
+}
 
-    # Rate limit usage (only present for Pro/Max, only after first API call)
+# Rate limit usage (only present for Pro/Max, only after first API call)
+function Get-RateLimitBarString($rl, $now) {
+    if (-not $rl) { return '' }
     $rlParts = @()
-    $rl = $j.rate_limits
-    if ($rl) {
-        $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-        $part = Get-RateLimitDisplay $rl.five_hour '5h' 5 300   180  60   15 $now
-        if ($part) { $rlParts += $part }
-        $part = Get-RateLimitDisplay $rl.seven_day '7d' 7 10080 4320 1440 0  $now
-        if ($part) { $rlParts += $part }
-    }
-    $rlStr = if ($rlParts) { " $($rlParts -join ' ')" } else { '' }
+    $part = Get-RateLimitDisplay $rl.five_hour '5h' 5 300   180  60   15 $now
+    if ($part) { $rlParts += $part }
+    $part = Get-RateLimitDisplay $rl.seven_day '7d' 7 10080 4320 1440 0  $now
+    if ($part) { $rlParts += $part }
+    if ($rlParts) { " $($rlParts -join ' ')" } else { '' }
+}
 
-    # CWD in prompt format (mirrors On-PromptLocationChanged.ps1)
+# CWD in prompt format (mirrors On-PromptLocationChanged.ps1)
+function Format-LocationString($project, $cwd) {
+    if ($project) {
+        $subdir  = if ($project.subdir) { " $($project.subdir)/" -replace '\\', '/' } else { '' }
+        $bk      = if ($project.buildKind) { "($($project.buildKind))" } else { '' }
+        " [$($project.id.ToLower())]$bk$subdir"
+    } else {
+        " $cwd"
+    }
+}
+
+function Get-StatusLineString($j, $now, [switch] $NoCwd) {
+    $bar = Get-ContextBar $j
+    $rlStr = Get-RateLimitBarString $j.rate_limits $now
+
     $loc = ''
     if (-not $NoCwd) {
         # Prefer the dir 'cl' was launched from over Claude Code's reported cwd, which is the role dir
         # (see CL_LAUNCH_CWD in Invoke-AgentSession.ps1). Falls back to $j.cwd for non-'cl' sessions.
         $cwd = if ($env:CL_LAUNCH_CWD) { $env:CL_LAUNCH_CWD } else { $j.cwd }
         $project = Get-PratProject $cwd -ErrorAction SilentlyContinue
-        if ($project) {
-            $subdir  = if ($project.subdir) { " $($project.subdir)/" -replace '\\', '/' } else { '' }
-            $bk      = if ($project.buildKind) { "($($project.buildKind))" } else { '' }
-            $loc     = " [$($project.id.ToLower())]$bk$subdir"
-        } else {
-            $loc = " $cwd"
-        }
+        $loc = Format-LocationString $project $cwd
     }
 
     # Active plan, set by the pl launcher (Launch-Plan.ps1); absent for plain cl sessions.
@@ -93,5 +97,12 @@ if ($MyInvocation.InvocationName -ne '.') {
     # Model used for the last turn (Claude Code sends the model active for the response just completed)
     $modelStr = if ($j.model.display_name) { "   ($($j.model.display_name))" } else { '' }
 
-    Write-Host "$sandboxWarn$bar$loc$planStr$rlStr$modelStr"
+    "$sandboxWarn$bar$loc$planStr$rlStr$modelStr"
+}
+
+if ($MyInvocation.InvocationName -ne '.') {
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    $j = [Console]::In.ReadToEnd() | ConvertFrom-Json
+    $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    Write-Host (Get-StatusLineString $j $now -NoCwd:$NoCwd)
 }
