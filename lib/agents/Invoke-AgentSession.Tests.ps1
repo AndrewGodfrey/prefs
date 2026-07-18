@@ -169,4 +169,35 @@ Describe "Invoke-AgentSession" {
             { & $script -Harness 'unknown' -LaunchHook $hook -Context $ctx } | Should -Throw "Unknown harness*"
         }
     }
+
+    Context "repoSkills present — syncs junctions" {
+        BeforeAll {
+            $roleDir = (New-Item "TestDrive:/role-reposkills" -ItemType Directory).FullName
+            $ctx     = New-MockCtx -RoleDir $roleDir
+            $ctx.repoSkills = @(@{ repo = 'huggingface'; from = '/claude/skills'; skills = @('x') })
+            $hook = { param($resumeSid, $allArgs) }
+        }
+
+        It "calls Sync-RepoSkillJunctions with the role's .claude/skills dir" {
+            Mock Sync-RepoSkillJunctions { }
+            & $script -Harness 'claude' -LaunchHook $hook -Context $ctx
+            Should -Invoke Sync-RepoSkillJunctions -Times 1 -Exactly -ParameterFilter {
+                $SkillsDir -like "*role-reposkills*skills"
+            }
+        }
+    }
+
+    Context "no repoSkills — does not sync" {
+        BeforeAll {
+            $roleDir = (New-Item "TestDrive:/role-noreposkills" -ItemType Directory).FullName
+            $ctx     = New-MockCtx -RoleDir $roleDir
+            $hook = { param($resumeSid, $allArgs) }
+        }
+
+        It "does not call Sync-RepoSkillJunctions" {
+            Mock Sync-RepoSkillJunctions { }
+            & $script -Harness 'claude' -LaunchHook $hook -Context $ctx
+            Should -Invoke Sync-RepoSkillJunctions -Times 0 -Exactly
+        }
+    }
 }

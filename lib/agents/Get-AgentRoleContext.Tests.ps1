@@ -7,6 +7,7 @@ Describe "Get-AgentRoleContext" {
         BeforeAll {
             function Get-PratProject { param($Location) $null }
             function Test-Path { param($Path) $true }
+            function Get-AgentRoles { @{} }
         }
 
         It "returns default roleDir with forward slashes" {
@@ -31,6 +32,7 @@ Describe "Get-AgentRoleContext" {
         BeforeAll {
             function Get-PratProject { param($Location) @{ agentRole = 'myrole'; root = 'C:/repos/myrepo' } }
             function Test-Path { param($Path) $true }
+            function Get-AgentRoles { @{} }
         }
 
         It "returns role-specific roleDir with forward slashes" {
@@ -59,6 +61,7 @@ Describe "Get-AgentRoleContext" {
         BeforeAll {
             function Get-PratProject { param($Location) @{ root = 'C:/repos/myrepo' } }
             function Test-Path { param($Path) $true }
+            function Get-AgentRoles { @{} }
         }
 
         It "uses default role and populates roleName, targetRepo and contextMessage" {
@@ -67,6 +70,35 @@ Describe "Get-AgentRoleContext" {
             $result.roleDir        | Should -BeLike "*/agentRoles/default"
             $result.targetRepo     | Should -Be "C:/repos/myrepo"
             $result.contextMessage | Should -BeLike "*C:/repos/myrepo*"
+        }
+    }
+
+    Context "role with repoSkills" {
+        BeforeAll {
+            function Get-PratProject { param($Location) @{ agentRole = 'huggingface'; root = 'C:/repos/hf' } }
+            function Test-Path { param($Path) $true }
+            function Get-AgentRoles {
+                @{ huggingface = @{ skills = @('a'); repoSkills = @(@{ repo = 'huggingface'; from = 'skills'; skills = @('huggingface-local-models') }) } }
+            }
+        }
+
+        It "attaches the role's repoSkills to the context" {
+            $result = & $script -cwd "C:/repos/ct"
+            @($result.repoSkills)[0].repo   | Should -Be 'huggingface'
+            @($result.repoSkills)[0].skills | Should -Be @('huggingface-local-models')
+        }
+    }
+
+    Context "role without repoSkills" {
+        BeforeAll {
+            function Get-PratProject { param($Location) @{ agentRole = 'plain'; root = 'C:/repos/p' } }
+            function Test-Path { param($Path) $true }
+            function Get-AgentRoles { @{ plain = @{ skills = @('a') } } }
+        }
+
+        It "sets repoSkills to null" {
+            $result = & $script -cwd "C:/repos/p"
+            $result.repoSkills | Should -BeNull
         }
     }
 

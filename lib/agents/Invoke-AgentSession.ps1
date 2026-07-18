@@ -14,6 +14,18 @@ if ($Context.targetRepo -and $Harness -ne 'pi') {
     $ctxArgs = @('--add-dir', $Context.targetRepo)
 }
 
+# Re-evaluate the current role's repo-skill junctions on every launch, so newly-added (or removed)
+# repo skills, and branch switches that swap the junction targets, are picked up without a redeploy.
+# A sync failure shouldn't block the session — warn and continue with whatever skills are present.
+if ($Context.repoSkills) {
+    try {
+        $skillsDir = Join-Path $Context.roleDir '.claude/skills'
+        Sync-RepoSkillJunctions -RepoSkills $Context.repoSkills -SkillsDir $skillsDir -ResolveRepoRoot { param($id) Get-PratRepoRoot $id }
+    } catch {
+        Write-Warning "Sync-RepoSkillJunctions failed: $_"
+    }
+}
+
 $launchCwd = $PWD.Path
 Push-Location $Context.roleDir
 $envToken = @{}

@@ -15,4 +15,7 @@ if ($project -and $project.root) {
     $contextMessage = "Your target repository for this session is at $($project.root). The launch directory is the agent-role dir (it carries your skills); treat $($project.root) as the repo you're working on."
 }
 
-return @{ roleName = $agentRole; roleDir = $roleDir; targetRepo = $targetRepo; contextMessage = $contextMessage }
+$allRoles   = Get-AgentRoles
+$repoSkills = if ($allRoles.ContainsKey($agentRole)) { $allRoles[$agentRole].repoSkills } else { $null }
+
+return @{ roleName = $agentRole; roleDir = $roleDir; targetRepo = $targetRepo; contextMessage = $contextMessage; repoSkills = $repoSkills }
