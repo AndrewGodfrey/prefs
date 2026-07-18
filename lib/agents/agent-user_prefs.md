@@ -130,6 +130,15 @@ it as a permanent artifact. The corresponding `_done.md` may be kept for referen
 If a plan is intended for an audience beyond us (review, sharing, publication), it's a deliverable
 — treat it accordingly. If which flavor isn't clear from context, ask.
 
+### Know your audience
+
+When drafting a message the user will send to another person (e.g. a note to a co-contributor, a team question, 
+a work-item description): simplify the wording to the essential. Cut mechanism the reader doesn't need explained.
+For each factual claim, attach a code pointer hosted somewhere they can access, e.g. (`[class Foo](url)`).
+These pointers are "evidentiary" i.e. cheap to verify. This is important for a) me, to verify before
+sending, and b) the reader, so they can cheaply verify and follow the argument. Check skills for cheap ways to generate
+these urls (the mechanism depends on the environment).
+
 ### Don't narrate decision reversals — in docs or code comments
 
 When a decision flips in a spec/planning doc (e.g. `add` → `convert`), or when a comment goes in
