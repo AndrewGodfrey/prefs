@@ -405,6 +405,10 @@ function getCursorGuardScript() {
 
 function launchCl([string] $harness, [string] $cwd, [string] $planFile) {
     resetConsoleMode
+    # The picker's own menu is the last thing drawn on screen (pickFromList clears before
+    # rendering, not after) so without this, getCursorGuardScript sees the cursor left wherever
+    # the menu's last line landed and pauses even when the child's profile printed nothing.
+    clearConsole
     # Use Start-Process -NoNewWindow so the child process inherits the console directly,
     # bypassing PowerShell's pipeline stdout/stderr capture which breaks interactive TUI apps.
     # Use -EncodedCommand (Base64) to avoid Windows command-line quoting issues: Start-Process
