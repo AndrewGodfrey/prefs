@@ -17,5 +17,6 @@ if ($project -and $project.root) {
 
 $allRoles   = Get-AgentRoles
 $repoSkills = if ($allRoles.ContainsKey($agentRole)) { $allRoles[$agentRole].repoSkills } else { $null }
+$repoAgents = if ($allRoles.ContainsKey($agentRole)) { $allRoles[$agentRole].repoAgents } else { $null }
 
-return @{ roleName = $agentRole; roleDir = $roleDir; targetRepo = $targetRepo; contextMessage = $contextMessage; repoSkills = $repoSkills }
+return @{ roleName = $agentRole; roleDir = $roleDir; targetRepo = $targetRepo; contextMessage = $contextMessage; repoSkills = $repoSkills; repoAgents = $repoAgents }

@@ -200,4 +200,37 @@ Describe "Invoke-AgentSession" {
             Should -Invoke Sync-RepoSkillJunctions -Times 0 -Exactly
         }
     }
+
+    Context "repoAgents present — syncs agent junctions" {
+        BeforeAll {
+            $roleDir = (New-Item "TestDrive:/role-repoagents" -ItemType Directory).FullName
+            $ctx     = New-MockCtx -RoleDir $roleDir
+            $ctx.repoAgents = @(@{ repo = 'foo'; from = '.claude/agents' })
+            $hook = { param($resumeSid, $allArgs) }
+        }
+
+        It "calls Sync-RoleAgents with the role dir" {
+            Mock Sync-RoleAgents { }
+            & $script -Harness 'claude' -LaunchHook $hook -Context $ctx
+            Should -Invoke Sync-RoleAgents -Times 1 -Exactly -ParameterFilter {
+                $RoleDir -like "*role-repoagents"
+            }
+        }
+    }
+
+    Context "no repoAgents — still syncs, so a de-listed config self-heals" {
+        BeforeAll {
+            $roleDir = (New-Item "TestDrive:/role-norepoagents" -ItemType Directory).FullName
+            $ctx     = New-MockCtx -RoleDir $roleDir
+            $hook = { param($resumeSid, $allArgs) }
+        }
+
+        It "still calls Sync-RoleAgents with null repoAgents" {
+            Mock Sync-RoleAgents { }
+            & $script -Harness 'claude' -LaunchHook $hook -Context $ctx
+            Should -Invoke Sync-RoleAgents -Times 1 -Exactly -ParameterFilter {
+                $null -eq $RepoAgents
+            }
+        }
+    }
 }

@@ -26,6 +26,16 @@ if ($Context.repoSkills) {
     }
 }
 
+# Copy the target repos' custom agents into <roleDir>/subagents, and expose that to both
+# Claude Code and Copilot via junctions at <roleDir>/.claude/agents and <roleDir>/.github/agents.
+# Always called (not gated on repoAgents) so that removing a role's repoAgents config also cleans
+# up any subagents/ and harness junctions synced by an earlier run.
+try {
+    Sync-RoleAgents -RepoAgents $Context.repoAgents -RoleDir $Context.roleDir -ResolveRepoRoot { param($id) Get-PratRepoRoot $id }
+} catch {
+    Write-Warning "Sync-RoleAgents failed: $_"
+}
+
 $launchCwd = $PWD.Path
 Push-Location $Context.roleDir
 $envToken = @{}

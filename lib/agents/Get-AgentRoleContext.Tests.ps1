@@ -100,6 +100,27 @@ Describe "Get-AgentRoleContext" {
             $result = & $script -cwd "C:/repos/p"
             $result.repoSkills | Should -BeNull
         }
+
+        It "sets repoAgents to null" {
+            $result = & $script -cwd "C:/repos/p"
+            $result.repoAgents | Should -BeNull
+        }
+    }
+
+    Context "role with repoAgents" {
+        BeforeAll {
+            function Get-PratProject { param($Location) @{ agentRole = 'foo'; root = 'C:/repos/foo' } }
+            function Test-Path { param($Path) $true }
+            function Get-AgentRoles {
+                @{ foo = @{ skills = @('a'); repoAgents = @(@{ repo = 'foo'; from = '.github/agents' }) } }
+            }
+        }
+
+        It "carries the role's repoAgents through to the context" {
+            $result = & $script -cwd "C:/repos/foo"
+            @($result.repoAgents)[0].repo | Should -Be 'foo'
+            @($result.repoAgents)[0].from | Should -Be '.github/agents'
+        }
     }
 
     Context "missing roleDir" {
