@@ -1,6 +1,11 @@
 param($installationTracker, [string[]] $Suppress = @())
 
 if ($MyInvocation.InvocationName -ne ".") {
+    # Pinned rather than tracking latest: CC updates now mostly cost productivity (half-baked new
+    # features to troubleshoot), and it's in occasional use alongside other coding agents. Bump this
+    # manually when ready to move to a newer version.
+    Set-ClaudePinnedVersion "2.1.215"
+
     foreach ($packageId in @("pwsh", "wget", "df", "ditto", "sysinternals", "claude", "gh", "python", "nuget", "powertoys")) {
         if ("pkg/$packageId" -notin $Suppress) {
             Install-PratPackage $installationTracker $packageId
