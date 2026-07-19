@@ -1,5 +1,17 @@
 param([switch] $NoCwd)
 Import-Module "$home\prat\lib\PratBase\PratBase.psd1" -ErrorAction SilentlyContinue
+. "$home/prat/lib/agents/PlanState.ps1"
+
+# Maps plan lifecycle state to the statusline's stage label. 'checkpointed' is transient — pl
+# always resolves it to ready-to-implement before a session goes live (see getLaunchAction in
+# Launch-Plan.ps1) — so it, like a missing/unrecognized state, falls back to "planning".
+function Get-PlanStageLabel([string] $state) {
+    switch ($state) {
+        'ready-to-implement' { 'coding' }
+        'code-complete'      { 'reviewing' }
+        default              { 'planning' }
+    }
+}
 
 # Returns a formatted rate-limit display string, or nothing if the window is too new or too close to reset.
 # Color: yellow-green = on pace to exhaust; yellow = within $yellowThresholdMins; orange = within $redThresholdMins; red = completely out.
@@ -89,7 +101,10 @@ function Get-StatusLineString($j, $now, [switch] $NoCwd) {
     # Active plan, set by the pl launcher (Launch-Plan.ps1); absent for plain cl sessions.
     # ASCII marker on purpose: symbol glyphs come from fallback fonts with unpredictable cell
     # width (observed: U+270E rendered 2 cells), which can trigger repaint artifacts.
-    $planStr = if ($env:CL_PLAN_FILE) { " plan:$([System.IO.Path]::GetFileNameWithoutExtension($env:CL_PLAN_FILE))" } else { '' }
+    $planStr = if ($env:CL_PLAN_FILE) {
+        $stage = Get-PlanStageLabel (Get-PlanState $env:CL_PLAN_FILE).State
+        " ${stage}:$([System.IO.Path]::GetFileNameWithoutExtension($env:CL_PLAN_FILE))"
+    } else { '' }
 
     # Set by cl (Start-CommandLineAgent.ps1) at launch; absent for sessions not launched that way.
     $sandboxWarn = if ($env:CL_SANDBOX_MODE -ne '1') { "`e[38;2;255;200;0m*`e[0m " } else { '' }

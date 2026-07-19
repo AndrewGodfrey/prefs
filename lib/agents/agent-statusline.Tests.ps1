@@ -3,6 +3,13 @@ BeforeAll {
     . "$PSScriptRoot/agent-statusline.ps1"
 
     $script:now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $script:testDriveRoot = ((Get-Item "TestDrive:\").FullName -replace '\\', '/').TrimEnd('/')
+
+    function writePlanFile([string] $name, [string] $content) {
+        $path = "$script:testDriveRoot/$name"
+        [System.IO.File]::WriteAllText($path, $content)
+        return $path
+    }
 
     function MakeWindow($usedPct, $minsLeft) {
         @{ used_percentage = $usedPct; resets_at = $script:now + [int]($minsLeft * 60) }
@@ -214,13 +221,56 @@ Describe "claude-statusline" {
         }
     }
 
+    Context "Get-PlanStageLabel" {
+        It "maps ready-to-plan to planning" {
+            Get-PlanStageLabel 'ready-to-plan' | Should -Be 'planning'
+        }
+
+        It "maps ready-to-implement to coding" {
+            Get-PlanStageLabel 'ready-to-implement' | Should -Be 'coding'
+        }
+
+        It "maps code-complete to reviewing" {
+            Get-PlanStageLabel 'code-complete' | Should -Be 'reviewing'
+        }
+
+        It "defaults checkpointed to planning (pl always resolves it before a session goes live)" {
+            Get-PlanStageLabel 'checkpointed' | Should -Be 'planning'
+        }
+
+        It "defaults null/unrecognized state to planning" {
+            Get-PlanStageLabel $null | Should -Be 'planning'
+            Get-PlanStageLabel 'made-up-state' | Should -Be 'planning'
+        }
+    }
+
     Context "CL_PLAN_FILE display" {
-        It "shows the plan name (no extension) when CL_PLAN_FILE is set" {
+        It "shows the plan name (no extension) prefixed with its stage" {
             try {
-                $env:CL_PLAN_FILE = 'C:/plans/myplan-upgrade.md'
+                $env:CL_PLAN_FILE = writePlanFile 'myplan-upgrade.md' "# Title`r`n`r`nbody`r`n"
                 $out = Get-StatusLineString @{ cwd = $env:TEMP } $script:now -NoCwd
-                $out | Should -Match 'myplan-upgrade'
+                $out | Should -Match 'planning:myplan-upgrade'
                 $out | Should -Not -Match 'myplan-upgrade\.md'
+            } finally {
+                Remove-Item Env:\CL_PLAN_FILE -ErrorAction SilentlyContinue
+            }
+        }
+
+        It "shows 'coding:' when the plan's state is ready-to-implement" {
+            try {
+                $env:CL_PLAN_FILE = writePlanFile 'coding-plan.md' "---`r`ncurrent-step:`r`n  state: ready-to-implement`r`n---`r`n"
+                $out = Get-StatusLineString @{ cwd = $env:TEMP } $script:now -NoCwd
+                $out | Should -Match 'coding:coding-plan'
+            } finally {
+                Remove-Item Env:\CL_PLAN_FILE -ErrorAction SilentlyContinue
+            }
+        }
+
+        It "shows 'reviewing:' when the plan's state is code-complete" {
+            try {
+                $env:CL_PLAN_FILE = writePlanFile 'review-plan.md' "---`r`ncurrent-step:`r`n  state: code-complete`r`n---`r`n"
+                $out = Get-StatusLineString @{ cwd = $env:TEMP } $script:now -NoCwd
+                $out | Should -Match 'reviewing:review-plan'
             } finally {
                 Remove-Item Env:\CL_PLAN_FILE -ErrorAction SilentlyContinue
             }
@@ -229,7 +279,7 @@ Describe "claude-statusline" {
         It "shows no plan segment when CL_PLAN_FILE is unset" {
             Remove-Item Env:\CL_PLAN_FILE -ErrorAction SilentlyContinue
             $out = Get-StatusLineString @{ cwd = $env:TEMP } $script:now -NoCwd
-            $out | Should -Not -Match 'plan:'
+            $out | Should -Not -Match 'planning:|coding:|reviewing:'
         }
     }
 
