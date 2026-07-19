@@ -8,12 +8,48 @@ if (-not (Test-Path $roleDir)) {
     throw "Agent role dir not found: $roleDir (has 'd' been run since the roles change?)"
 }
 
-$targetRepo     = $null
-$contextMessage = $null
+$targetRepo         = $null
+$targetRepoSentence = $null
 if ($project -and $project.root) {
-    $targetRepo     = $project.root
-    $contextMessage = "Your target repository for this session is at $($project.root). The launch directory is the agent-role dir (it carries your skills); treat $($project.root) as the repo you're working on."
+    $targetRepo         = $project.root
+    $targetRepoSentence = "Your target repository for this session is at $($project.root). The launch directory is the agent-role dir (it carries your skills); treat $($project.root) as the repo you're working on."
 }
+
+# Context files, resolved to absolute paths (dedup key, so a coincidental overlap collapses
+# instead of loading the same content twice):
+#  - de/prat/prefs always load. This "prat ecosystem" cluster is tightly coupled enough that a
+#    session rooted in any one of them routinely touches the others too, and Claude Code has no
+#    way to load that reactively as it happens - so all three load unconditionally at launch.
+#  - any other repo only contributes its own instructions file if its codebaseProfile entry
+#    explicitly opts in via `agentInstructionsFile` (a path relative to the repo root, e.g.
+#    "AGENTS.md" or ".github/copilot-instructions.md"). Loading an arbitrary repo's instructions
+#    unconditionally would give it unvetted, instruction-level authority over the session.
+$contextFilePaths = [ordered]@{}
+# Get-CodebaseLayers returns highest-to-lowest (de, prefs, prat) - the right order for merge
+# precedence, but for reading order we want the reverse: foundational-to-specific.
+$layers = @(Get-CodebaseLayers)
+[array]::Reverse($layers)
+foreach ($layer in $layers) {
+    if ($layer.Name -in @('de', 'prat', 'prefs')) {
+        $contextFilePaths["$($layer.Path)/AGENTS.md"] = $true
+    }
+}
+if ($project -and $project.agentInstructionsFile -and $targetRepo) {
+    $contextFilePaths["$targetRepo/$($project.agentInstructionsFile)"] = $true
+}
+
+$agentsMdSnippets = @()
+foreach ($path in $contextFilePaths.Keys) {
+    if (Test-Path $path) {
+        $agentsMdSnippets += "<!-- $path -->`n`n" + (Get-Content -Raw $path)
+    }
+}
+
+$contextParts = @()
+if ($targetRepoSentence) { $contextParts += $targetRepoSentence }
+$contextParts += $agentsMdSnippets
+
+$contextMessage = if ($contextParts.Count -gt 0) { $contextParts -join "`n`n" } else { $null }
 
 $allRoles   = Get-AgentRoles
 $repoSkills = if ($allRoles.ContainsKey($agentRole)) { $allRoles[$agentRole].repoSkills } else { $null }
