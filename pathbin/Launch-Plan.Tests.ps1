@@ -3,6 +3,7 @@ BeforeDiscovery {
 }
 
 BeforeAll {
+    Import-Module "$home/prat/lib/PratBase/PratBase.psd1" -Force
     . "$PSScriptRoot/Launch-Plan.ps1"
 }
 
