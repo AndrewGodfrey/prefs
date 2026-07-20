@@ -21,9 +21,8 @@ if ($project -and $project.root) {
 #    session rooted in any one of them routinely touches the others too, and Claude Code has no
 #    way to load that reactively as it happens - so all three load unconditionally at launch.
 #  - any other repo only contributes its own instructions file if its codebaseProfile entry
-#    explicitly opts in via `agentInstructionsFile` (a path relative to the repo root, e.g.
-#    "AGENTS.md" or ".github/copilot-instructions.md"). Loading an arbitrary repo's instructions
-#    unconditionally would give it unvetted, instruction-level authority over the session.
+#    explicitly opts in via `trustAgentInstructions = $true`. The filename loaded is
+#    "AGENTS.md" by default, or can be specified with `agentInstructionsFile` (relative to the repo root).
 $contextFilePaths = [ordered]@{}
 # Get-CodebaseLayers returns highest-to-lowest (de, prefs, prat) - the right order for merge
 # precedence, but for reading order we want the reverse: foundational-to-specific.
@@ -34,8 +33,9 @@ foreach ($layer in $layers) {
         $contextFilePaths["$($layer.Path)/AGENTS.md"] = $true
     }
 }
-if ($project -and $project.agentInstructionsFile -and $targetRepo) {
-    $contextFilePaths["$targetRepo/$($project.agentInstructionsFile)"] = $true
+if ($project -and $project.trustAgentInstructions -eq $true -and $targetRepo) {
+    $instructionsFile = if ($project.agentInstructionsFile) { $project.agentInstructionsFile } else { "AGENTS.md" }
+    $contextFilePaths["$targetRepo/$instructionsFile"] = $true
 }
 
 $agentsMdSnippets = @()

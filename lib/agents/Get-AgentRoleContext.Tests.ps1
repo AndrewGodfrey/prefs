@@ -129,7 +129,7 @@ Describe "Get-AgentRoleContext" {
 
     Context "AGENTS.md content combination — repo opts in via agentInstructionsFile" {
         BeforeAll {
-            function Get-PratProject { param($Location) @{ agentRole = 'myrole'; root = 'C:/repos/myrepo'; agentInstructionsFile = '.github/copilot-instructions.md' } }
+            function Get-PratProject { param($Location) @{ agentRole = 'myrole'; root = 'C:/repos/myrepo'; trustAgentInstructions = $true; agentInstructionsFile = '.github/copilot-instructions.md' } }
             function Test-Path { param($Path) $true }
             function Get-AgentRoles { @{} }
             function Get-CodebaseLayers { @() }
@@ -142,7 +142,22 @@ Describe "Get-AgentRoleContext" {
         }
     }
 
-    Context "AGENTS.md content combination — repo without agentInstructionsFile doesn't opt in" {
+    Context "AGENTS.md content combination — trusted repo without agentInstructionsFile defaults to AGENTS.md" {
+        BeforeAll {
+            function Get-PratProject { param($Location) @{ agentRole = 'myrole'; root = 'C:/repos/myrepo'; trustAgentInstructions = $true } }
+            function Test-Path { param($Path) $true }
+            function Get-AgentRoles { @{} }
+            function Get-CodebaseLayers { @() }
+            function Get-Content { param($Path, [switch] $Raw) "content-of($Path)" }
+        }
+
+        It "loads AGENTS.md at the repo root" {
+            $result = & $script -cwd "C:/repos/myrepo"
+            $result.contextMessage | Should -BeLike "*content-of(C:/repos/myrepo/AGENTS.md)*"
+        }
+    }
+
+    Context "AGENTS.md content combination — repo without trustAgentInstructions doesn't opt in" {
         BeforeAll {
             function Get-PratProject { param($Location) @{ agentRole = 'myrole'; root = 'C:/repos/myrepo' } }
             function Test-Path { param($Path) $true }
@@ -159,7 +174,7 @@ Describe "Get-AgentRoleContext" {
 
     Context "AGENTS.md content combination — opted-in file missing on disk" {
         BeforeAll {
-            function Get-PratProject { param($Location) @{ agentRole = 'myrole'; root = 'C:/repos/myrepo'; agentInstructionsFile = 'AGENTS.md' } }
+            function Get-PratProject { param($Location) @{ agentRole = 'myrole'; root = 'C:/repos/myrepo'; trustAgentInstructions = $true; agentInstructionsFile = 'AGENTS.md' } }
             function Test-Path { param($Path) $Path -notlike '*AGENTS.md' }
             function Get-AgentRoles { @{} }
             function Get-CodebaseLayers { @() }
@@ -175,7 +190,7 @@ Describe "Get-AgentRoleContext" {
 
     Context "AGENTS.md content combination — opted-in path coincides with a cluster member" {
         BeforeAll {
-            function Get-PratProject { param($Location) @{ agentRole = 'myrole'; root = 'C:/layers/prat'; agentInstructionsFile = 'AGENTS.md' } }
+            function Get-PratProject { param($Location) @{ agentRole = 'myrole'; root = 'C:/layers/prat'; trustAgentInstructions = $true; agentInstructionsFile = 'AGENTS.md' } }
             function Test-Path { param($Path) $true }
             function Get-AgentRoles { @{} }
             function Get-CodebaseLayers { @(@{ Name = 'prat'; Path = 'C:/layers/prat' }) }
