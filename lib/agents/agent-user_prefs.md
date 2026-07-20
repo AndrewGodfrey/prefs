@@ -65,12 +65,10 @@ Don't argue that the change isn't needed, isn't justified yet, or should wait. I
 
 ### Session length
 
-Prefer short sessions with plan-file continuity over long sessions that rely on compaction.
-
-Why (cloud models; local models change this): cached re-reads are ~1/10 price but recur on every
-request, so over a session they grow O(n²) with turn count while new tokens grow O(n). Past a
-crossover the cached re-reads dominate — a single added turn at the end of a long session can cost
-more than the same work done uncached in a fresh session.
+Prefer short sessions with plan-file continuity over long sessions that rely on compaction. Cost
+grows superlinearly with turn count, so a marginal turn late in a long session can cost more than
+the same work done in a fresh session — when a session is already long, lean toward deferring new
+work rather than extending. (Cloud models; local models change this.)
 
 ### We work in parallel
 The following is my typical workflow. Sometimes I might instead ask you to commit a series of changes to a branch, but
@@ -130,15 +128,6 @@ it as a permanent artifact. The corresponding `_done.md` may be kept for referen
 If a plan is intended for an audience beyond us (review, sharing, publication), it's a deliverable
 — treat it accordingly. If which flavor isn't clear from context, ask.
 
-### Know your audience
-
-When drafting a message the user will send to another person (e.g. a note to a co-contributor, a team question, 
-a work-item description): simplify the wording to the essential. Cut mechanism the reader doesn't need explained.
-For each factual claim, attach a code pointer hosted somewhere they can access, e.g. (`[class Foo](url)`).
-These pointers are "evidentiary" i.e. cheap to verify. This is important for a) me, to verify before
-sending, and b) the reader, so they can cheaply verify and follow the argument. Check skills for cheap ways to generate
-these urls (the mechanism depends on the environment).
-
 ### Don't narrate decision reversals — in docs or code comments
 
 When a decision flips in a spec/planning doc (e.g. `add` → `convert`), or when a comment goes in
@@ -153,11 +142,6 @@ no reference to what it used to be or what an earlier pass assumed.
 
 Dates of evidence-gathering are OK ("as of 2026-05-28, no internal readers exist") — those mark
 data freshness, not a decision reversal.
-
-How to apply: when editing a decision section after a label change, fully replace the prose;
-preserve evidence that grounds the current rationale, drop the "we used to think / then switched"
-framing. In code, before adding a comment right after fixing your own mistake, ask whether it
-explains the design or narrates the correction — cut it if the latter.
 
 ### Reading repo source — don't trust a stale clone
 
