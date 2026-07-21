@@ -80,4 +80,13 @@ Here's a best-effort list of extensions and settings I set up ... which are now 
   - ranyitz.search-presets - Ctrl-Alt-F to use.
 #>
 
+# Time to hack! Since vscode installs a copy of ripgrep, just use that one.
+
+$rgPath = "$env:localappdata\Programs\Microsoft VS Code\8a7abeba6e\resources\app\node_modules.asar.unpacked\@vscode\ripgrep-universal\bin\win32-x64\rg.exe"
+if (-not (Test-Path $rgPath)) {
+  Write-Warning "ripgrep not found at $rgPath."
+} else {
+  Install-InteractiveAlias $stage 'rg' $rgPath
+}
+
 $installationTracker.EndStage($stage)
