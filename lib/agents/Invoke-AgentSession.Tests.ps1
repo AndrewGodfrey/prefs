@@ -316,4 +316,21 @@ Describe "Invoke-AgentSession" {
             }
         }
     }
+
+    Context "repoInstructions present — passes through to Sync-RoleAgents" {
+        BeforeAll {
+            $roleDir = (New-Item "TestDrive:/role-repoinst" -ItemType Directory).FullName
+            $ctx     = New-MockCtx -RoleDir $roleDir
+            $ctx.repoInstructions = @(@{ repo = 'bar'; from = '.github/instructions' })
+            $hook = { param($resumeSid, $allArgs) }
+        }
+
+        It "passes RepoInstructions to Sync-RoleAgents" {
+            Mock Sync-RoleAgents { }
+            & $script -Harness 'claude' -LaunchHook $hook -Context $ctx
+            Should -Invoke Sync-RoleAgents -Times 1 -Exactly -ParameterFilter {
+                $null -ne $RepoInstructions -and @($RepoInstructions)[0].repo -eq 'bar'
+            }
+        }
+    }
 }

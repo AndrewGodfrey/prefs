@@ -269,6 +269,22 @@ Describe "Get-AgentRoleContext" {
         }
     }
 
+    Context "role with repoInstructions" {
+        BeforeAll {
+            function Get-PratProject { param($Location) @{ agentRole = 'baz'; root = 'C:/repos/baz' } }
+            function Test-Path { param($Path) $true }
+            function Get-AgentRoles {
+                @{ baz = @{ skills = @('a'); repoInstructions = @(@{ repo = 'baz'; from = '.github/instructions' }) } }
+            }
+        }
+
+        It "carries the role's repoInstructions through to the context" {
+            $result = & $script -cwd "C:/repos/baz"
+            @($result.repoInstructions)[0].repo | Should -Be 'baz'
+            @($result.repoInstructions)[0].from | Should -Be '.github/instructions'
+        }
+    }
+
     Context "missing roleDir" {
         BeforeAll {
             function Get-PratProject { param($Location) $null }

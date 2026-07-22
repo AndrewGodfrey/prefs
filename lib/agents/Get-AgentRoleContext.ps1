@@ -52,7 +52,8 @@ $contextParts += $agentsMdSnippets
 $contextMessage = if ($contextParts.Count -gt 0) { $contextParts -join "`n`n" } else { $null }
 
 $allRoles   = Get-AgentRoles
-$repoSkills = if ($allRoles.ContainsKey($agentRole)) { $allRoles[$agentRole].repoSkills } else { $null }
-$repoAgents = if ($allRoles.ContainsKey($agentRole)) { $allRoles[$agentRole].repoAgents } else { $null }
+$repoSkills       = if ($allRoles.ContainsKey($agentRole)) { $allRoles[$agentRole].repoSkills } else { $null }
+$repoAgents       = if ($allRoles.ContainsKey($agentRole)) { $allRoles[$agentRole].repoAgents } else { $null }
+$repoInstructions = if ($allRoles.ContainsKey($agentRole)) { $allRoles[$agentRole].repoInstructions } else { $null }
 
-return @{ roleName = $agentRole; roleDir = $roleDir; targetRepo = $targetRepo; contextMessage = $contextMessage; repoSkills = $repoSkills; repoAgents = $repoAgents }
+return @{ roleName = $agentRole; roleDir = $roleDir; targetRepo = $targetRepo; contextMessage = $contextMessage; repoSkills = $repoSkills; repoAgents = $repoAgents; repoInstructions = $repoInstructions }
