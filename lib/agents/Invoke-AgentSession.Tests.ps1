@@ -55,6 +55,23 @@ Describe "Invoke-AgentSession" {
         }
     }
 
+    Context "claude's args come from prefs's own built-in, not a switch case — but de can't reconfigure them" {
+        BeforeAll {
+            $roleDir  = (New-Item "TestDrive:/role-claude-override" -ItemType Directory).FullName
+            $ctx      = New-MockCtx -RoleDir $roleDir -TargetRepo 'C:/repos/myrepo' -ContextMessage 'work on C:/repos/myrepo'
+            $captured = @{}
+            $hook = { param($resumeSid, $allArgs) $captured.allArgs = $allArgs }
+        }
+
+        It "keeps --add-dir and --append-system-prompt even if the registry tries to reconfigure claude (de selects, doesn't configure)" {
+            function Get-AgentHarnesses { @(@{ name = 'claude'; supportsAddDir = $false; contextArgStyle = 'none' }) }
+
+            & $script -Harness 'claude' -LaunchHook $hook -Context $ctx
+            $captured.allArgs | Should -Contain '--add-dir'
+            $captured.allArgs | Should -Contain '--append-system-prompt'
+        }
+    }
+
     Context "--resume <sid> in passthrough args" {
         BeforeAll {
             $roleDir  = (New-Item "TestDrive:/role-resume" -ItemType Directory).FullName
@@ -158,6 +175,66 @@ Describe "Invoke-AgentSession" {
         }
     }
 
+    Context "pi harness — bound-repo project" {
+        BeforeAll {
+            $roleDir  = (New-Item "TestDrive:/role-pi" -ItemType Directory).FullName
+            $ctx      = New-MockCtx -RoleDir $roleDir -TargetRepo 'C:/repos/myrepo' -ContextMessage 'work on C:/repos/myrepo'
+            $captured = @{}
+            $hook = { param($resumeSid, $allArgs) $captured.allArgs = $allArgs }
+        }
+
+        It "never gets --add-dir, even with a bound repo (preserved from its old switch case)" {
+            & $script -Harness 'pi' -LaunchHook $hook -Context $ctx
+            $captured.allArgs | Should -Not -Contain '--add-dir'
+        }
+
+        It "includes --append-system-prompt mentioning targetRepo" {
+            & $script -Harness 'pi' -LaunchHook $hook -Context $ctx
+            $idx = [array]::IndexOf([object[]]$captured.allArgs, '--append-system-prompt')
+            $idx | Should -BeGreaterOrEqual 0
+            $captured.allArgs[$idx + 1] | Should -BeLike '*C:/repos/myrepo*'
+        }
+
+        It "includes --skill ./.claude/skills/ (its built-in additionalArgs)" {
+            & $script -Harness 'pi' -LaunchHook $hook -Context $ctx
+            $idx = [array]::IndexOf([object[]]$captured.allArgs, '--skill')
+            $idx | Should -BeGreaterOrEqual 0
+            $captured.allArgs[$idx + 1] | Should -Be './.claude/skills/'
+        }
+    }
+
+    Context "pi harness — unbound project (no contextMessage)" {
+        BeforeAll {
+            $roleDir  = (New-Item "TestDrive:/role-pi-unbound" -ItemType Directory).FullName
+            $ctx      = New-MockCtx -RoleDir $roleDir
+            $captured = @{}
+            $hook = { param($resumeSid, $allArgs) $captured.allArgs = $allArgs }
+        }
+
+        It "still includes --skill even with no contextMessage (additionalArgs isn't coupled to it)" {
+            & $script -Harness 'pi' -LaunchHook $hook -Context $ctx
+            $captured.allArgs | Should -Contain '--skill'
+        }
+    }
+
+    Context "registered custom harness — bound-repo project" {
+        BeforeAll {
+            $roleDir  = (New-Item "TestDrive:/role-custom" -ItemType Directory).FullName
+            $ctx      = New-MockCtx -RoleDir $roleDir -TargetRepo 'C:/repos/myrepo' -ContextMessage 'work on C:/repos/myrepo'
+            $captured = @{}
+            $hook = { param($resumeSid, $allArgs) $captured.allArgs = $allArgs }
+        }
+
+        It "passes through args with no --add-dir and no --append-system-prompt (bare passthrough)" {
+            function Get-AgentHarnesses { @(@{ name = 'customtool' }) }
+
+            & $script -Harness 'customtool' -LaunchHook $hook -Context $ctx 'someArg'
+            $captured.allArgs | Should -Not -Contain '--add-dir'
+            $captured.allArgs | Should -Not -Contain '--append-system-prompt'
+            $captured.allArgs | Should -Contain 'someArg'
+        }
+    }
+
     Context "unknown harness" {
         BeforeAll {
             $roleDir  = (New-Item "TestDrive:/role-unk" -ItemType Directory).FullName
@@ -167,6 +244,12 @@ Describe "Invoke-AgentSession" {
 
         It "throws for unknown harness" {
             { & $script -Harness 'unknown' -LaunchHook $hook -Context $ctx } | Should -Throw "Unknown harness*"
+        }
+
+        It "throws for a harness absent from Get-AgentHarnesses even when the command exists" {
+            function Get-AgentHarnesses { @(@{ name = 'customtool' }) }
+
+            { & $script -Harness 'somethingelse' -LaunchHook $hook -Context $ctx } | Should -Throw "Unknown harness*"
         }
     }
 

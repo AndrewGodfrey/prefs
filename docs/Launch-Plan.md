@@ -1,7 +1,7 @@
 # Launch-Plan (`pl`)
 
 `Launch-Plan.ps1` (alias `pl`), in `prefs/pathbin/`: an interactive TUI launcher for plan-based agent
-sessions (Claude Code and GitHub Copilot).
+sessions. (e.g. Claude Code, Github Copilot, pi)
 
 ## Three ledgers
 
@@ -50,7 +50,7 @@ pointer is set, else the bare state, else `-`). The marker shows what Enter will
 Plans open on another machine get an `⚠ other-machine` flag (see cross-machine visibility below).
 
 Keys: `Enter` open, `O` open untracked plan, `R` register orphan session, `S` change state,
-`V` view plan file, `U` unregister, `Q`/`Esc` quit.
+`H` change harness, `V` view plan file, `U` unregister, `Q`/`Esc` quit.
 
 ## Enter: the fresh/resume picker
 
@@ -103,6 +103,10 @@ session id.
 - **V — view plan**: opens the selected plan file via `Open-FileInEditor` (the `e` alias's target;
   prat-deployed, so available in the interactive profile pl runs under). No-op if that alias isn't
   installed.
+- **H — change harness**: picks `claude`, plus any custom harness registered via `Get-AgentHarnesses`
+  that carries a `pickerKey` (`changeHarness`/`getHarnessPickerOptions`). Unlike state, harness is a
+  db-only field (`saveDb`, not a plan-file write). `copilot` isn't offered here — still fully
+  supported, just not reachable from this picker. Blocked while a session is live.
 - **U — unregister**: removes the db entry. Blocked while live.
 
 ## db.json
@@ -131,10 +135,10 @@ quit CC → land in pl → Enter resumes.
 
 ## Live-session detection
 
-No hook: both harnesses carry their session id on their own live process command line, so pl scans
-`claude.exe`/`copilot.exe` command lines directly (`getLiveSessionRecords`, one call per harness) and
-resolves them against the db (`resolveHarnessSessions`) — id match first, then (copilot only) a cwd-match
-fallback to a sole unoccupied entry. Anything left unmatched is an orphan (`R` is the repair).
+Thanks to wrapping harnesses with 'cl', every harness carries its session id on its own live process command line.
+So pl scans process command lines directly (`getLiveSessionRecords`, one call per harness) and resolves them
+against the db (`resolveHarnessSessions`) — id match first, then (copilot only) a cwd-match fallback
+to a sole unoccupied entry. Anything left unmatched is an orphan (`R` is the repair).
 
 - **Claude**: `--session-id <uuid>` (fresh, added by pl — see Resume/Fresh above) or `--resume <sid>`
   (resume). No cwd appears on the command line, and pl-launched claude sessions don't need cwd-matching —
@@ -143,6 +147,10 @@ fallback to a sole unoccupied entry. Anything left unmatched is an orphan (`R` i
 - **Copilot**: session id and cwd are parsed from live `copilot.exe` command lines (`--session-id`/
   `--resume`, `-C`) — copilot's own launcher supplies these unprompted, no pl involvement needed. Unmatched
   sessions are cwd-matched to a sole unoccupied entry, else orphaned.
+- **A custom harness** (`Get-AgentHarnesses`, see Configuration below): scanned only if its descriptor
+  supplies `liveProcessName`, filtered by `liveCmdlineFilter` when the process name alone would be too
+  generic (e.g. a bare interpreter like `python.exe` shared by unrelated processes). No cwd-match
+  fallback, same as claude.
 
 ## Cross-machine visibility
 
@@ -165,5 +173,26 @@ Deliberately deferred as of 2026-07; presence files carrying live session ids is
 
 - **Plans dir**: `Resolve-PratLibFile 'lib/agents/Get-PlansDir.ps1'` (de-supplied). Without it, `O` is
   unavailable and `R` can only target already-tracked plans.
-- **Harness**: each db entry carries a `harness` (`claude`/`copilot`), defaulted via `Get-DefaultHarness`
-  and stamped by copilot detection when it matches a session.
+- **Harness**: each db entry carries a `harness`, defaulted via `getDefaultHarness`
+  (`(Get-AgentHarnesses)[0].name`) and stamped by live-process detection when it matches a session.
+  `Get-AgentHarnesses` is *required* (unlike the optional `Get-AgentModelList`) but only *selects*
+  which harnesses de uses and their order. A harness is fully inactive — not offered in the `H` menu,
+  not live-scanned, not resumable — unless its name is listed, even a well-known one: claude/
+  copilot/pi's own properties come from prefs's built-in `getBuiltinHarnessDescriptors` and can't be
+  reconfigured via the registry, but the registry still has to name them to turn them on (a bare
+  `@{ name = 'copilot' }` entry is enough). A name prefs has no built-in for is the *augmenting*
+  case: see the next bullet. pi is live-detected (as `node.exe`, filtered by its script path since
+  that process name is generic — see `Invoke-AgentSession.ps1` for its launch-arg handling) but not
+  resumable: its `--resume` takes no session id (it shows its own interactive menu instead), so pl
+  has no way to resume one specific past session non-interactively.
+- **`Get-AgentHarnesses`** (de-supplied, required — called bare-name): returns an array of
+  `@{ name = '<harness>'; ... }`, first entry = default. Extra properties only matter for a harness
+  name prefs doesn't already know (claude/copilot): `pickerKey` (offered in the `H` menu),
+  `liveProcessName`/`liveCmdlineFilter` (live-process scan — the filter matters when the process name
+  alone is too generic, e.g. a bare interpreter shared by unrelated processes), `liveCwdMatch`
+  (cwd-match fallback for a harness whose command line carries one), `sessionsDir` (resumable-session
+  lookup reads this harness's own flat `<sessionsDir>/<sid>.jsonl` files — `getFlatSessionInfos`/
+  `getFlatSessionSummary`, summarized from the first logged `user_message` event) or `sessionInfoStyle
+  = 'claude-projects'` (reads the CC-style `~/.claude/projects/*/<sid>.jsonl` layout instead — claude/
+  copilot's built-in style, opt-in-able for a custom harness stored the same way). A custom harness
+  with none of these is still launchable, just not live-detected or resumable through pl.

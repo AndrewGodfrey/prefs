@@ -9,8 +9,36 @@ for ($i = 0; $i -lt $ARGS.Count - 1; $i++) {
     if ($ARGS[$i] -eq '--resume') { $resumeSid = $ARGS[$i + 1]; break }
 }
 
+# Prefs's own knowledge of claude's and pi's args — the only harness-specific data hardcoded in this
+# file. de's Get-AgentHarnesses doesn't need to repeat this to select either; it only matters for a
+# harness prefs has no built-in knowledge of (the "augmenting" case in getHarnessDescriptor below).
+# pi has no supportsAddDir (it has never gotten --add-dir — preserved here, not a new choice) and an
+# additionalArgs tail (its --skill flag) beyond what claude needs; additionalArgs is generic, so a
+# de-supplied custom harness could use it too. copilot keeps its own switch case below (a bespoke
+# file-based context injection, not reducible to these properties); any other harness (built-in or a
+# de-supplied custom one) is handled generically in `default`.
+function getBuiltinHarnessDescriptors {
+    return @(
+        @{ name = 'claude'; supportsAddDir = $true; contextArgStyle = 'append-system-prompt' }
+        @{ name = 'pi'; contextArgStyle = 'append-system-prompt'; additionalArgs = @('--skill', './.claude/skills/') }
+    )
+}
+
+# The descriptor for one harness: the built-in if it's claude/pi, else its own entry from the
+# registry (the augmenting case — a harness prefs has no built-in knowledge of supplies its full
+# descriptor itself). $null for copilot (handled by its own switch case) or a name neither source
+# knows.
+function getHarnessDescriptor([string] $harness) {
+    if ($harness -eq 'copilot') { return $null }
+    $builtin = @(getBuiltinHarnessDescriptors | Where-Object { $_.name -eq $harness }) | Select-Object -First 1
+    if ($builtin) { return $builtin }
+    return @(Get-AgentHarnesses | Where-Object { $_ -and $_.name -eq $harness }) | Select-Object -First 1
+}
+
+$harnessDescriptor = getHarnessDescriptor $Harness
+
 $ctxArgs = @()
-if ($Context.targetRepo -and $Harness -ne 'pi') {
+if ($Context.targetRepo -and (($Harness -eq 'copilot') -or ($harnessDescriptor -and $harnessDescriptor.supportsAddDir))) {
     $ctxArgs = @('--add-dir', $Context.targetRepo)
 }
 
@@ -46,13 +74,6 @@ try {
         CL_LAUNCH_CWD = $launchCwd
     }
     switch ($Harness) {
-        'claude' {
-            $claudeArgs = $ctxArgs
-            if ($Context.contextMessage) {
-                $claudeArgs = $claudeArgs + @('--append-system-prompt', $Context.contextMessage)
-            }
-            & $LaunchHook $resumeSid ($claudeArgs + $ARGS)
-        }
         'copilot' {
             $ctxDir = $null
             if ($Context.contextMessage) {
@@ -70,15 +91,17 @@ try {
                 }
             }
         }
-        'pi' {
-            $piArgs = $ctxArgs
-            if ($Context.contextMessage) {
-                $piArgs = $piArgs + @('--append-system-prompt', $Context.contextMessage, '--skill', './.claude/skills/')
+        default {
+            if (-not $harnessDescriptor) { throw "Unknown harness: $Harness" }
+            $defaultArgs = $ctxArgs
+            if ($harnessDescriptor.contextArgStyle -eq 'append-system-prompt' -and $Context.contextMessage) {
+                $defaultArgs = $defaultArgs + @('--append-system-prompt', $Context.contextMessage)
             }
-            & $LaunchHook $resumeSid ($piArgs + $ARGS)
+            if ($harnessDescriptor.additionalArgs) {
+                $defaultArgs = $defaultArgs + @($harnessDescriptor.additionalArgs)
+            }
+            & $LaunchHook $resumeSid ($defaultArgs + $ARGS)
         }
-
-        default   { throw "Unknown harness: $Harness" }
     }
 } finally {
     Pop-Location

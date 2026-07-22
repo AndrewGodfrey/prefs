@@ -356,6 +356,22 @@ Describe "getLiveSessionRecords" {
 
         (getLiveSessionRecords 'claude' 'claude.exe').Count | Should -Be 0
     }
+
+    It "matches a custom-harness session cmdline (e.g. python.exe running a script) when a cmdlineFilter is given" {
+        Mock getLiveHarnessProcs { @([pscustomobject]@{ CommandLine = 'python.exe "C:\tools\customtool\customtool.py" --session-id 44444444-5555-6666-7777-888888888888' }) }
+
+        $r = getLiveSessionRecords 'customtool' 'python.exe' 'customtool.py'
+
+        $r.Count         | Should -Be 1
+        $r[0].session_id | Should -Be '44444444-5555-6666-7777-888888888888'
+        $r[0].harness    | Should -Be 'customtool'
+    }
+
+    It "skips a python.exe cmdline that doesn't match the cmdlineFilter (an unrelated python process)" {
+        Mock getLiveHarnessProcs { @([pscustomobject]@{ CommandLine = 'python.exe --session-id 44444444-5555-6666-7777-888888888888' }) }
+
+        (getLiveSessionRecords 'customtool' 'python.exe' 'customtool.py').Count | Should -Be 0
+    }
 }
 
 Describe "resolveHarnessSessions" {
@@ -475,6 +491,106 @@ Describe "getResumeArgs" {
     It "copilot uses the --resume=<id> form" {
         $r = getResumeArgs 'copilot' 'sid-1'
         $r | Should -Be @('--resume=sid-1')
+    }
+
+    It "any custom (non-copilot) harness uses space-separated --resume" {
+        $r = getResumeArgs 'customtool' 'sid-1'
+        $r | Should -Be @('--resume', 'sid-1')
+    }
+}
+
+Describe "getAgentHarnesses" {
+    It "invokes Get-AgentHarnesses and returns its list" {
+        function Get-AgentHarnesses { @(@{ name = 'claude' }, @{ name = 'customtool' }) }
+
+        @((getAgentHarnesses).name) | Should -Be @('claude', 'customtool')
+    }
+}
+
+Describe "getDefaultHarness" {
+    It "returns the first entry's name" {
+        Mock getAgentHarnesses { @(@{ name = 'customtool' }, @{ name = 'claude' }) }
+
+        getDefaultHarness | Should -Be 'customtool'
+    }
+}
+
+Describe "getBuiltinHarnessDescriptors" {
+    It "includes claude with its live-process and session-info defaults" {
+        $claude = @(getBuiltinHarnessDescriptors | Where-Object { $_.name -eq 'claude' })[0]
+
+        $claude.liveProcessName  | Should -Be 'claude.exe'
+        $claude.sessionInfoStyle | Should -Be 'claude-projects'
+        $claude.pickerKey        | Should -Be 'C'
+    }
+
+    It "includes copilot with cwd-matching enabled" {
+        $copilot = @(getBuiltinHarnessDescriptors | Where-Object { $_.name -eq 'copilot' })[0]
+
+        $copilot.liveProcessName  | Should -Be 'copilot.exe'
+        $copilot.liveCwdMatch     | Should -BeTrue
+        $copilot.sessionInfoStyle | Should -Be 'claude-projects'
+    }
+
+    It "includes pi, filtered by its script path since it runs as the generic node.exe" {
+        $pi = @(getBuiltinHarnessDescriptors | Where-Object { $_.name -eq 'pi' })[0]
+
+        $pi.liveProcessName   | Should -Be 'node.exe'
+        $pi.liveCmdlineFilter | Should -Be 'pi-coding-agent'
+    }
+
+    It "picker keys are unique across the built-ins" {
+        $keys = @(getBuiltinHarnessDescriptors | Where-Object { $_.pickerKey } | ForEach-Object { $_.pickerKey })
+
+        ($keys | Select-Object -Unique).Count | Should -Be $keys.Count
+    }
+}
+
+Describe "getHarnessDescriptor" {
+    It "returns claude's built-in descriptor even if the registry lists it too (de just selects it, doesn't configure it)" {
+        Mock getAgentHarnesses { @(@{ name = 'claude'; pickerKey = 'X' }) }
+
+        (getHarnessDescriptor 'claude').liveProcessName | Should -Be 'claude.exe'
+        (getHarnessDescriptor 'claude').pickerKey       | Should -Be 'C'
+    }
+
+    It "returns the registry's own entry for a harness with no built-in (the augmenting case)" {
+        Mock getAgentHarnesses { @(@{ name = 'customtool'; sessionsDir = 'C:/x' }) }
+
+        (getHarnessDescriptor 'customtool').sessionsDir | Should -Be 'C:/x'
+    }
+
+    It "returns null for an unregistered, non-built-in harness name" {
+        Mock getAgentHarnesses { @(@{ name = 'customtool' }) }
+
+        getHarnessDescriptor 'somethingelse' | Should -BeNullOrEmpty
+    }
+}
+
+Describe "getHarnessDescriptors" {
+    It "only includes a built-in de has actually selected" {
+        Mock getAgentHarnesses { @(@{ name = 'claude' }) }
+
+        @((getHarnessDescriptors).name) | Should -Be @('claude')
+    }
+
+    It "includes multiple selected built-ins, in registry order" {
+        Mock getAgentHarnesses { @(@{ name = 'claude' }, @{ name = 'pi' }) }
+
+        @((getHarnessDescriptors).name) | Should -Be @('claude', 'pi')
+    }
+
+    It "ignores a registry entry that just re-selects a built-in by name" {
+        Mock getAgentHarnesses { @(@{ name = 'claude'; pickerKey = 'X' }) }
+
+        $claude = @(getHarnessDescriptors | Where-Object { $_.name -eq 'claude' })[0]
+        $claude.pickerKey | Should -Be 'C'
+    }
+
+    It "appends a registry-only entry that has no built-in, without pulling in unselected built-ins" {
+        Mock getAgentHarnesses { @(@{ name = 'claude' }, @{ name = 'customtool'; pickerKey = 'X' }) }
+
+        @((getHarnessDescriptors).name) | Should -Be @('claude', 'customtool')
     }
 }
 
@@ -1331,13 +1447,23 @@ Describe "getFreshSessionArgs" {
         $entry.sessionIds | Should -Contain $got[1]
     }
 
-    It "returns no args and leaves sessionIds untouched for a non-claude harness (its own launcher supplies one)" {
+    It "returns no args and leaves sessionIds untouched for copilot (its own launcher supplies one)" {
         $entry = [pscustomobject]@{ sessionIds = @('existing') }
 
         $got = getFreshSessionArgs 'copilot' $entry
 
         @($got).Count         | Should -Be 0
         @($entry.sessionIds) | Should -Be @('existing')
+    }
+
+    It "generates a --session-id for a custom harness too (it can't detect its own fresh session otherwise)" {
+        $entry = [pscustomobject]@{ sessionIds = @() }
+
+        $got = getFreshSessionArgs 'customtool' $entry
+
+        $got[0] | Should -Be '--session-id'
+        $got[1] | Should -Match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+        $entry.sessionIds | Should -Contain $got[1]
     }
 }
 
@@ -1420,6 +1546,72 @@ Describe "getSessionInfos" {
         $infos = @(getSessionInfos @('sid-new') $script:projRoot)
 
         $infos[0].lastActive | Should -Be (Get-Date '2026-06-01')
+    }
+}
+
+Describe "getSessionInfos (custom harness)" {
+    BeforeAll {
+        $script:customSessionsDir = ((New-Item -ItemType Directory "TestDrive:\customtool-sessions").FullName -replace '\\', '/').TrimEnd('/')
+
+        function writeFlatLog([string] $sid, [string[]] $lines) {
+            Set-Content "$script:customSessionsDir/$sid.jsonl" $lines
+        }
+
+        writeFlatLog 'sid-a' @(
+            (@{type = 'system_prompt'; content = 'sys'} | ConvertTo-Json -Compress)
+            (@{type = 'user_message'; content = 'What does this function do?'} | ConvertTo-Json -Compress)
+        )
+        (Get-Item "$script:customSessionsDir/sid-a.jsonl").LastWriteTime = Get-Date '2026-06-01'
+
+        writeFlatLog 'sid-b' @(
+            (@{type = 'system_prompt'; content = 'sys'} | ConvertTo-Json -Compress)
+        )
+        (Get-Item "$script:customSessionsDir/sid-b.jsonl").LastWriteTime = Get-Date '2026-01-01'
+
+        writeFlatLog 'sid-longmsg' @(
+            (@{type = 'user_message'; content = ('x' * 100)} | ConvertTo-Json -Compress)
+        )
+    }
+
+    BeforeEach {
+        Mock getHarnessDescriptor { @{ name = 'customtool'; sessionsDir = $script:customSessionsDir } }
+    }
+
+    It "sorts most-recent-first by jsonl mtime" {
+        $infos = @(getSessionInfos @('sid-b', 'sid-a') 'unused' 'customtool')
+
+        @($infos.sid) | Should -Be @('sid-a', 'sid-b')
+    }
+
+    It "excludes sids with no jsonl file" {
+        $infos = @(getSessionInfos @('sid-a', 'sid-missing') 'unused' 'customtool')
+
+        @($infos.sid) | Should -Be @('sid-a')
+    }
+
+    It "uses the first user_message event's content as the summary" {
+        $infos = @(getSessionInfos @('sid-a') 'unused' 'customtool')
+
+        $infos[0].summary | Should -Be 'What does this function do?'
+    }
+
+    It "falls back to the sid when the log has no user_message event" {
+        $infos = @(getSessionInfos @('sid-b') 'unused' 'customtool')
+
+        $infos[0].summary | Should -Be 'sid-b'
+    }
+
+    It "truncates a long user_message to 60 chars" {
+        $infos = @(getSessionInfos @('sid-longmsg') 'unused' 'customtool')
+
+        $infos[0].summary.Length | Should -Be 60
+        $infos[0].summary        | Should -Match '\.\.\.$'
+    }
+
+    It "returns empty when the harness has no registered descriptor" {
+        Mock getHarnessDescriptor { $null }
+
+        @(getSessionInfos @('sid-a') 'unused' 'unknownharness') | Should -HaveCount 0
     }
 }
 
@@ -1681,7 +1873,7 @@ Describe "openUntracked" {
         Mock Read-Host { "" }
         Mock clearConsole { }
         Mock getPlansDir { return $script:untrackedRoot }
-        Mock Get-DefaultHarness { return 'claude' }
+        Mock getDefaultHarness { return 'claude' }
         Mock getSessionInfos { @() }
         Mock pickFromList { return 0 }
         $script:launched = $null
@@ -1815,6 +2007,86 @@ Describe "changeState" {
         changeState $db $entry
 
         (Get-PlanState -PlanFile $plan).State | Should -Be 'ready-to-plan'
+        Should -Invoke saveDb -Times 0
+    }
+}
+
+Describe "getHarnessPickerOptions" {
+    It "includes a selected built-in at its key" {
+        Mock getAgentHarnesses { @(@{ name = 'claude' }) }
+
+        (getHarnessPickerOptions)['C'] | Should -Be 'claude'
+    }
+
+    It "excludes an unselected built-in even though prefs knows its properties" {
+        Mock getAgentHarnesses { @(@{ name = 'claude' }) }
+
+        (getHarnessPickerOptions).Contains('3') | Should -BeFalse
+    }
+
+    It "includes a custom harness at its own pickerKey" {
+        Mock getAgentHarnesses { @(@{ name = 'customtool'; pickerKey = 'X' }) }
+
+        (getHarnessPickerOptions)['X'] | Should -Be 'customtool'
+    }
+
+    It "a registry entry can't add a pickerKey to a built-in (de selects claude/copilot, doesn't configure them)" {
+        Mock getAgentHarnesses { @(@{ name = 'copilot'; pickerKey = 'G' }) }
+
+        (getHarnessPickerOptions).Contains('G') | Should -BeFalse
+    }
+
+    It "excludes a custom harness with no pickerKey" {
+        Mock getAgentHarnesses { @(@{ name = 'claude' }, @{ name = 'customtool' }) }
+
+        @((getHarnessPickerOptions).Keys) | Should -Be @('C')
+    }
+}
+
+Describe "changeHarness" {
+    BeforeEach {
+        Mock saveDb { }
+        Mock Write-Host { }
+        Mock clearConsole { }
+        Mock getAgentHarnesses { @(@{ name = 'claude' }, @{ name = 'customtool'; pickerKey = 'X' }) }
+    }
+
+    It "writes the picked harness to the db entry" -TestCases @(
+        @{ Key = 'C'; Expected = 'claude';     Initial = 'customtool' }
+        @{ Key = 'X'; Expected = 'customtool'; Initial = 'claude' }
+    ) {
+        param($Key, $Expected, $Initial)
+        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; cwd = "C:/de"; sessionIds = @(); harness = $Initial}
+        $db    = [System.Collections.Generic.List[object]]::new()
+        $db.Add($entry)
+        Mock readStateKey { return [pscustomobject]@{Key = $Key} }
+
+        changeHarness $db $entry
+
+        $entry.harness | Should -Be $Expected
+        Should -Invoke saveDb -Times 1
+    }
+
+    It "leaves the harness unchanged and does not save on an unrecognized key" {
+        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; cwd = "C:/de"; sessionIds = @(); harness = 'claude'}
+        $db    = [System.Collections.Generic.List[object]]::new()
+        $db.Add($entry)
+        Mock readStateKey { return [pscustomobject]@{Key = 'Escape'} }
+
+        changeHarness $db $entry
+
+        $entry.harness | Should -Be 'claude'
+        Should -Invoke saveDb -Times 0
+    }
+
+    It "does not save when the picked harness matches the current one" {
+        $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; cwd = "C:/de"; sessionIds = @(); harness = 'claude'}
+        $db    = [System.Collections.Generic.List[object]]::new()
+        $db.Add($entry)
+        Mock readStateKey { return [pscustomobject]@{Key = 'C'} }
+
+        changeHarness $db $entry
+
         Should -Invoke saveDb -Times 0
     }
 }

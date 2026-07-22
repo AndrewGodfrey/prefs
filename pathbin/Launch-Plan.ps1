@@ -27,15 +27,14 @@ function main {
 function buildLauncherContext {
     $db = loadLauncherDb $dbPath
 
-    # Both harnesses now carry their session id on their own command line (claude via
-    # --session-id/--resume passed at launch; copilot's launcher does this unprompted), so a
-    # single scan per harness replaces the old hook-fed pid-file matching. Only copilot's command
-    # line also carries a cwd, so only it gets the cwd-match fallback pass.
+    # For tracking, we arrange for the session id to be on the harness's command line.
     $liveSessionIds = [System.Collections.Generic.HashSet[string]]::new()
     $orphans        = [System.Collections.Generic.List[string]]::new()
     $sessionHarness = @{}
-    resolveHarnessSessions $db (getLiveSessionRecords 'claude' 'claude.exe')   $liveSessionIds $orphans $sessionHarness $false
-    resolveHarnessSessions $db (getLiveSessionRecords 'copilot' 'copilot.exe') $liveSessionIds $orphans $sessionHarness $true
+    foreach ($h in (getHarnessDescriptors)) {
+        if (-not $h.liveProcessName) { continue }
+        resolveHarnessSessions $db (getLiveSessionRecords $h.name $h.liveProcessName $h.liveCmdlineFilter) $liveSessionIds $orphans $sessionHarness ([bool] $h.liveCwdMatch)
+    }
 
     saveDb $db $dbPath
     attachEntryInfo $db
@@ -73,7 +72,7 @@ function attachEntryInfo($db) {
 function updateEntryInfo($entry) {
     $planState = Get-PlanState -PlanFile $entry.planFile
     $state     = $planState.State
-    $resumable = @(getSessionInfos $entry.sessionIds).Count -gt 0
+    $resumable = @(getSessionInfos $entry.sessionIds -harness $entry.harness).Count -gt 0
     $entry | Add-Member -NotePropertyName state -NotePropertyValue $state -Force
     $entry | Add-Member -NotePropertyName nextStep -NotePropertyValue $planState.NextStep -Force
     $entry | Add-Member -NotePropertyName enterKind -NotePropertyValue (getLaunchAction $state $resumable $entry.planFile).kind -Force
@@ -113,6 +112,15 @@ function runLauncher($db, $liveSessionIds, $orphans, $crossFlags, $notices, $ses
                         $transientError = 'Cannot change state of a live session — exit the agent first.'
                     } else {
                         changeState $db $db[$selected]
+                    }
+                }
+            }
+            { $_ -in 'H', 'h' } {
+                if ($db.Count -gt 0) {
+                    if (isLive $db[$selected] $liveSessionIds) {
+                        $transientError = 'Cannot change harness of a live session — exit the agent first.'
+                    } else {
+                        changeHarness $db $db[$selected]
                     }
                 }
             }
@@ -200,7 +208,7 @@ function renderList($db, $selected, $liveSessionIds, $orphans, $crossFlags, $not
     }
 
     Write-Host ''
-    Write-Host '  [↑↓] navigate  [Enter] open  [O] open  [R] register  [S] state  [V] view  [U] unregister  [Q] quit' -ForegroundColor DarkCyan
+    Write-Host '  [↑↓] navigate  [Enter] open  [O] open  [R] register  [S] state  [H] harness  [V] view  [U] unregister  [Q] quit' -ForegroundColor DarkCyan
 
     if (($notices -and $notices.Count -gt 0) -or ($orphans -and $orphans.Count -gt 0)) {
         Write-Host ''
@@ -242,6 +250,33 @@ function changeState($db, $entry) {
     }
 }
 
+# Offers every selected harness (via getHarnessDescriptors) that has a 'pickerKey' property.
+function getHarnessPickerOptions {
+    $options = [ordered]@{}
+    foreach ($h in (getHarnessDescriptors)) {
+        if ($h.pickerKey) { $options[$h.pickerKey] = $h.name }
+    }
+    return $options
+}
+
+function changeHarness($db, $entry) {
+    $options = getHarnessPickerOptions
+
+    clearConsole
+    Write-Host "  Change harness: $(Split-Path $entry.planFile -Leaf)" -ForegroundColor Cyan
+    Write-Host ''
+    Write-Host "  Current harness: $($entry.harness)"
+    Write-Host ''
+    $menu = ($options.GetEnumerator() | ForEach-Object { "[$($_.Key)] $($_.Value)" }) -join '  '
+    Write-Host "  New harness:  $menu  [Esc] cancel"
+    $key = readStateKey
+    $newHarness = $options[$key.Key.ToString().ToUpper()]
+    if ($newHarness -and $newHarness -ne $entry.harness) {
+        $entry.harness = $newHarness
+        saveDb $db $dbPath
+    }
+}
+
 # Pure dispatch for opening a plan: lifecycle state + session availability → what to do.
 # kind 'fresh' launches a new session; kind 'resume' opens the session picker. .prompt always
 # carries the state's fresh-launch prompt — the picker offers it as its start-fresh row.
@@ -260,12 +295,10 @@ function getLaunchAction([string] $state, [bool] $hasResumableSessions, [string]
     return @{ kind = $kind; prompt = $prompt; setState = $null }
 }
 
-# claude carries no identifying info on its own process command line, so pl must supply a session
-# id for a fresh launch to be detectable there; copilot's own launcher already does this, so this
-# is a no-op for any other harness. Mutates $entry.sessionIds so the new session is tracked
-# immediately, without waiting for the next command-line scan.
+# By creating our own guid for fresh sessions, we can identify the corresponding process later.
+# Mutates $entry.sessionIds so the new session is tracked immediately, without waiting for the next command-line scan.
 function getFreshSessionArgs([string] $harness, $entry) {
-    if ($harness -ne 'claude') { return ,@() }
+    if ($harness -eq 'copilot') { return ,@() }
     $sid = [guid]::NewGuid().ToString()
     $entry.sessionIds = @($entry.sessionIds) + @($sid)
     return ,@('--session-id', $sid)
@@ -294,7 +327,7 @@ function openProject($db, $entry, $liveSessionIds) {
     }
 
     $state  = (Get-PlanState -PlanFile $entry.planFile).State
-    $infos  = @(getSessionInfos $entry.sessionIds)
+    $infos  = @(getSessionInfos $entry.sessionIds -harness $entry.harness)
     $action = getLaunchAction $state ($infos.Count -gt 0) $entry.planFile
     if ($action.setState) { $null = Set-PlanState -PlanFile $entry.planFile -State $action.setState }
 
@@ -368,6 +401,8 @@ public class LpConsole {
     public static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
     [DllImport("kernel32.dll", SetLastError=true)]
     public static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    public static extern bool SetConsoleCtrlHandler(IntPtr HandlerRoutine, bool Add);
 }
 "@
     }
@@ -425,18 +460,31 @@ function launchCl([string] $harness, [string] $cwd, [string] $planFile) {
     # active-plan default.
     $envToken = Set-EnvTemp @{ CL_PLAN_FILE = $planFile }
     try {
+        # The child shares this console (-NoNewWindow), so a keyboard Ctrl-C is broadcast to every
+        # process attached to it — including this pl process, blocked below in WaitForExit. Without
+        # this, pwsh's own Ctrl-C handling can abort pl's own script execution the instant the user
+        # interrupts the child's current turn, which then never returns control to pl. Ignoring it
+        # here only affects this process; the child (and its own Ctrl-C handling, if any) is
+        # unaffected.
+        [LpConsole]::SetConsoleCtrlHandler([IntPtr]::Zero, $true) | Out-Null
         $proc = Start-Process @spParams
         $proc.WaitForExit()
         return $proc.ExitCode
     } catch {
         return 1
     } finally {
+        [LpConsole]::SetConsoleCtrlHandler([IntPtr]::Zero, $false) | Out-Null
         Restore-Env $envToken
+        # The child inherited this same console (-NoNewWindow) and may have left its mode mutated —
+        # e.g. a Python child's msvcrt-based input handling changes console mode flags that aren't
+        # restored on exit. Reset again here so pl's own ReadKey-based loop resumes against a known
+        # mode instead of whatever the child last set.
+        resetConsoleMode
     }
 }
 
 # Thin wrapper so tests can mock it. Absent for non-de users / when the editor alias isn't
-# installed — a no-op in that case, matching Get-DefaultHarness/Get-AgentModelList's pattern.
+# installed — a no-op in that case, matching Get-AgentModelList's optional-command pattern.
 function openInEditor([string] $path) {
     $cmd = Get-Command Open-FileInEditor -ErrorAction SilentlyContinue
     if ($cmd) { & $cmd $path }
@@ -464,10 +512,18 @@ function showLaunchError([int] $exitCode) {
     }
 }
 
-# Resumable-session lookup: a session is resumable when its jsonl exists under the CC projects
-# root (searching all project dirs avoids reimplementing CC's cwd→dirname rule; the files are
-# sync-backed, so cross-machine sessions count too). Most-recent-first by jsonl mtime.
-function getSessionInfos($sessionIds, [string] $projectsRoot = "$home/.claude/projects") {
+# Resumable-session lookup
+function getSessionInfos($sessionIds, [string] $projectsRoot = "$home/.claude/projects", [string] $harness = 'claude') {
+    $descriptor = getHarnessDescriptor $harness
+    if ($descriptor -and $descriptor.sessionInfoStyle -eq 'claude-projects') { return getClaudeSessionInfos $sessionIds $projectsRoot }
+    if ($descriptor -and $descriptor.sessionsDir) { return getFlatSessionInfos $sessionIds $descriptor.sessionsDir }
+    return @()
+}
+
+# A session is resumable when its jsonl exists under the CC projects root (searching all project
+# dirs avoids reimplementing CC's cwd→dirname rule; the files are sync-backed, so cross-machine
+# sessions count too). Most-recent-first by jsonl mtime.
+function getClaudeSessionInfos($sessionIds, [string] $projectsRoot) {
     $infos = @()
     foreach ($sid in @($sessionIds | Where-Object { $_ })) {
         $jsonl = @(Get-ChildItem -Path "$projectsRoot/*/$sid.jsonl" -File -ErrorAction SilentlyContinue) | Select-Object -First 1
@@ -479,6 +535,38 @@ function getSessionInfos($sessionIds, [string] $projectsRoot = "$home/.claude/pr
         }
     }
     return @($infos | Sort-Object lastActive -Descending)
+}
+
+# For harnesses whose sessions are in flat dir structure (no per-project
+# subdirs, no sessions-index.json), so the lookup is a direct path check rather than a recursive
+# search.
+function getFlatSessionInfos($sessionIds, [string] $sessionsDir) {
+    $infos = @()
+    foreach ($sid in @($sessionIds | Where-Object { $_ })) {
+        $jsonl = Get-Item -LiteralPath "$sessionsDir/$sid.jsonl" -ErrorAction SilentlyContinue
+        if (-not $jsonl) { continue }
+        $infos += [pscustomobject]@{
+            sid        = $sid
+            lastActive = $jsonl.LastWriteTime
+            summary    = getFlatSessionSummary $jsonl
+        }
+    }
+    return @($infos | Sort-Object lastActive -Descending)
+}
+
+# Session title for the picker: the first logged user_message event's content (truncated), or the
+# session id when the log has none (e.g. a session that never completed a turn).
+function getFlatSessionSummary($jsonlItem) {
+    foreach ($line in (Get-Content -LiteralPath $jsonlItem.FullName)) {
+        if (-not $line.Trim()) { continue }
+        try { $event = $line | ConvertFrom-Json } catch { continue }
+        if ($event.type -eq 'user_message' -and $event.content) {
+            $content = [string] $event.content
+            if ($content.Length -gt 60) { return $content.Substring(0, 57) + '...' }
+            return $content
+        }
+    }
+    return $jsonlItem.BaseName
 }
 
 # Session title for picker display, from CC's sessions-index.json cache (may be missing or
@@ -545,7 +633,7 @@ function openUntracked($db) {
         planFile   = $planFile
         cwd        = normalizePath $PWD.Path
         sessionIds = @()
-        harness    = Get-DefaultHarness
+        harness    = getDefaultHarness
     }
     $db.Add($entry)
 
@@ -563,7 +651,7 @@ function registerProject($db, $orphans, $liveSessionIds, $sessionHarness = @{}) 
     $sidIdx = pickFromList $orphans { param($s) $s } 'Register — pick session'
     if ($null -eq $sidIdx) { return }
     $sid = $orphans[$sidIdx]
-    $harness = if ($sessionHarness -and $sessionHarness[$sid]) { $sessionHarness[$sid] } else { Get-DefaultHarness }
+    $harness = if ($sessionHarness -and $sessionHarness[$sid]) { $sessionHarness[$sid] } else { getDefaultHarness }
 
     # Build plan list: tracked entries + untracked from plansDir
     $trackedPaths = @($db | ForEach-Object { $_.planFile })
@@ -654,7 +742,7 @@ function loadDb([string] $path) {
             planFile   = $_.planFile
             cwd        = $_.cwd
             sessionIds = @($_.sessionIds | Where-Object { $_ })
-            harness    = if ($_.harness) { $_.harness } else { Get-DefaultHarness }
+            harness    = if ($_.harness) { $_.harness } else { getDefaultHarness }
         }
     })
 }
@@ -667,7 +755,7 @@ function saveDb($db, [string] $path) {
             planFile = $_.planFile
             cwd      = $_.cwd
             sessionIds = @($_.sessionIds)
-            harness  = if ($_.harness) { $_.harness } else { Get-DefaultHarness }
+            harness  = if ($_.harness) { $_.harness } else { getDefaultHarness }
         }
     })
     (ConvertTo-Json -InputObject $persisted -Depth 5) | Set-Content $path -Encoding UTF8
@@ -687,7 +775,10 @@ function getLiveHarnessProcs([string] $processName) {
 # getFreshSessionArgs/getResumeArgs). Fresh copilot sessions also carry `-C <cwd>`; resumed copilot
 # sessions and all claude sessions don't, so cwd stays $null for those. Each session can spawn more
 # than one process sharing the same id (e.g. copilot's parent + fork), so dedup by id.
-function getLiveSessionRecords([string] $harness, [string] $processName) {
+# $cmdlineFilter narrows matches to a substring of the command line — needed when a custom harness's
+# liveProcessName is a generic interpreter (e.g. 'python.exe') that would otherwise false-match any
+# unrelated process of that name carrying a --session-id/--resume-shaped argument.
+function getLiveSessionRecords([string] $harness, [string] $processName, [string] $cmdlineFilter = $null) {
     $sidRx = '--(?:session-id|resume)[ =]([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})'
     $cwdRx = '\s-C\s+(\S+)'
     $seen    = @{}
@@ -695,6 +786,7 @@ function getLiveSessionRecords([string] $harness, [string] $processName) {
     foreach ($proc in (getLiveHarnessProcs $processName)) {
         $cl = $proc.CommandLine
         if (-not $cl) { continue }
+        if ($cmdlineFilter -and $cl -notlike "*$cmdlineFilter*") { continue }
         $m = [regex]::Match($cl, $sidRx)
         if (-not $m.Success) { continue }
         $sid = $m.Groups[1].Value
@@ -760,17 +852,58 @@ function getClExtraArgs([string] $harness, $userArgs) {
     return ,(@("-Harness:$harness") + @($userArgs)) 
 }
 
-# Resume flag differs by harness: claude wants `--resume <id>` (two tokens), copilot `--resume=<id>`.
 function getResumeArgs([string] $harness, [string] $sid) {
-    if ($harness -eq 'claude') { return ,@('--resume', $sid) }
-    return ,@("--resume=$sid")
+    if ($harness -eq 'copilot') { return ,@("--resume=$sid") }
+    return ,@('--resume', $sid)
+}
+
+# --- Harness registry ---
+
+# Thin wrapper (mockable in tests) over the required de-supplied harness list
+function getAgentHarnesses {
+    return @(Get-AgentHarnesses)
+}
+
+function getDefaultHarness {
+    return (getAgentHarnesses)[0].name
+}
+
+# Noe: pi's --resume takes no session id (it shows its own interactive menu instead), so only live-detection and 
+# fresh-launch are supported for now.
+#
+# Picker keys must stay unique across this list.
+function getBuiltinHarnessDescriptors {
+    return @(
+        @{ name = 'claude'; liveProcessName = 'claude.exe'; sessionInfoStyle = 'claude-projects'; pickerKey = 'C' }
+        @{ name = 'copilot'; liveProcessName = 'copilot.exe'; liveCwdMatch = $true; sessionInfoStyle = 'claude-projects' }
+        @{ name = 'pi'; liveProcessName = 'node.exe'; liveCmdlineFilter = 'pi-coding-agent'; pickerKey = '3' }
+    )
+}
+
+# The descriptor for one harness — $null unless it's selected (its name appears in Get-AgentHarnesses,
+# even bare). A selected well-known harness (claude/copilot/pi) always resolves to prefs's own
+# built-in properties, ignoring anything else its registry entry says; a selected name with no
+# built-in (the "augmenting" case) uses its own registry entry directly. A built-in prefs knows about
+# but de hasn't selected is fully inactive — not offered, not live-scanned, not resumable.
+function getHarnessDescriptor([string] $harness) {
+    $selectedNames = @(getAgentHarnesses | Where-Object { $_ -and $_.name } | ForEach-Object { $_.name })
+    if ($harness -notin $selectedNames) { return $null }
+    $builtin = @(getBuiltinHarnessDescriptors | Where-Object { $_.name -eq $harness }) | Select-Object -First 1
+    if ($builtin) { return $builtin }
+    return @(getAgentHarnesses | Where-Object { $_ -and $_.name -eq $harness }) | Select-Object -First 1
+}
+
+# Every harness de has selected, resolved the same way as getHarnessDescriptor.
+function getHarnessDescriptors {
+    $selectedNames = @(getAgentHarnesses | Where-Object { $_ -and $_.name } | ForEach-Object { $_.name } | Select-Object -Unique)
+    return @($selectedNames | ForEach-Object { getHarnessDescriptor $_ } | Where-Object { $_ })
 }
 
 # --- Model picker ---
 
 # Thin wrapper over the optional de-specific model list command (mockable in tests). Bare-name
-# invocation, same pattern as Get-DefaultHarness: non-de users and unlisted harnesses see no
-# command on PATH, so this returns $null rather than throwing.
+# invocation. Unlike Get-AgentHarnesses this one is genuinely optional: non-de users and unlisted
+# harnesses see no command on PATH, so this returns $null rather than throwing.
 function tryInvokeAgentModelList {
     $cmd = Get-Command Get-AgentModelList -ErrorAction SilentlyContinue
     if (-not $cmd) { return $null }
