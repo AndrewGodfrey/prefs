@@ -27,6 +27,11 @@ carriers, not by raw code-search hits" → "Driven by carriers"); the trailing "
 filler restating X's opposite. Keep it only when "not Y" distinguishes two specific states the
 reader might conflate — "inferred, not verified" is fine if the emphasis is important.
 
+Don't stamp your own prose with a candor-label — "the honest X", or "honestly / candidly / frankly /
+to be clear" prefacing a concession. Labeling one claim honest impugns the unlabeled ones, and a
+cheap virtue-signal is weak evidence against the virtue; swapping in a synonym is the same tic. Let
+the content carry it.
+
 When flagging an open or blocking item in a status update (e.g. "still an open [USER] decision"),
 restate the actual substance of the question, not just a compressed label plus a role tag. A
 `[USER]`/`[AGENT]` tag in a plan is a plan-authoring convention marking who does a step — it's not
