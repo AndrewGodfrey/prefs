@@ -17,6 +17,20 @@ function setVscodeColorTheme([string] $content, [string] $filename) {
     return setVscodeJsonPropertyValue $content @("workbench.colorTheme") "`"Dark Modern`"" $filename
 }
 
+# Finds the ripgrep bundled inside a VS Code installation.
+# VS Code ships rg.exe under a version-hash subdir whose exact path varies
+# $installRoots is tried in order; the first root containing an @vscode ripgrep wins.
+function findVscodeRipgrep([string[]] $installRoots) {
+    foreach ($root in $installRoots) {
+        if (-not (Test-Path $root)) { continue }
+        $found = Get-ChildItem -Path $root -Recurse -Filter 'rg.exe' -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '@vscode[\\/]ripgrep' } |
+            Select-Object -First 1
+        if ($found) { return $found.FullName }
+    }
+    return $null
+}
+
 if ($MyInvocation.InvocationName -eq ".") { return }
 
 $stage = $installationTracker.StartStage('vscode')
@@ -82,9 +96,9 @@ Here's a best-effort list of extensions and settings I set up ... which are now 
 
 # Time to hack! Since vscode installs a copy of ripgrep, just use that one.
 
-$rgPath = "$env:localappdata\Programs\Microsoft VS Code\8a7abeba6e\resources\app\node_modules.asar.unpacked\@vscode\ripgrep-universal\bin\win32-x64\rg.exe"
-if (-not (Test-Path $rgPath)) {
-  Write-Warning "ripgrep not found at $rgPath."
+$rgPath = findVscodeRipgrep @("$env:localappdata\Programs\Microsoft VS Code", "C:\Program Files\Microsoft VS Code")
+if (-not $rgPath) {
+  Write-Warning "ripgrep not found in any known VS Code install location."
 } else {
   Install-InteractiveAlias $stage 'rg' $rgPath
 }
