@@ -87,7 +87,9 @@ So: Don't expect your changes to stay where you left them. And you don't need to
 
 The "staged" area is mine — it tracks my review progress. Git-state writes (staging, committing) are
 ACL-blocked for agents; to view changes, run `git diff` (unstaged) and `git diff --cached` (staged)
-separately.
+separately. Exception: when I explicitly direct a commit in the request (e.g. "commit this", "in N
+commits", "commit to branch X"), treat that as authorization to run `git add`/`git commit` for that
+specific request. Absent such a direction, staging/committing remains mine.
 
 If a file you're working on shows unexpected content mid-session (syntax error, unfamiliar
 additions), my concurrent edits are the default explanation, not tampering or injection — check
@@ -193,9 +195,10 @@ exhaustive options) are still fine as AskUserQuestion.
 - Markdown files: 
   - wrap lines at 120 characters max. Break at natural phrase boundaries
     for readability (like this).
-  - On wide tables in Markdown files, prepend them with `<!-- prettier-ignore -->`. Stops prettier from reflowing
-    them into less-readable shapes. Table rows and fenced code blocks are exempt from the 120
-    limit — they can't be wrapped, and the checker deliberately skips them.
+  - On wide tables, prepend `<!-- prettier-ignore -->` **only in Markdown files that prettier actually
+    processes** — not in chat/prose replies or non-prettier repos, where the comment is inert noise. Stops
+    prettier from reflowing them into less-readable shapes. Table rows and fenced code blocks are exempt from the
+    120 limit — they can't be wrapped, and the checker deliberately skips them.
   - A PostToolUse hook flags over-limit lines after every edit — heed its findings. For bulk
     checks: `Find-LongMarkdownLines [-Path <file|dir>]` (prat tooling).
   - Headings can't be wrapped either (each `#`-prefixed line becomes its own separate heading) —
