@@ -1,7 +1,6 @@
 ---
 name: kql-techniques
-description: Use when writing KQL queries, especially for timecharts and dashboards. Covers gap-free
-  timecharts, adaptive bin sizing, rate normalization, series management, and message classification.
+description: Use when writing KQL queries, especially for timecharts and dashboards.
 ---
 
 # KQL Techniques

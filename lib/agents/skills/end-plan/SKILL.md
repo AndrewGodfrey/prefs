@@ -1,7 +1,6 @@
 ---
 name: end-plan
-description: Finalize and close a completed plan. Runs the final wrap and deletes the plan file.
-  User-invocable only — do not trigger autonomously.
+description: Finalize and close a completed plan. User-invocable only — do not trigger autonomously.
 ---
 
 Closes a fully completed plan. The plan file is deleted; only the `*_done.md` file remains.
