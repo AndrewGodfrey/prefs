@@ -122,9 +122,16 @@ skill without explicit instruction. "Tests pass" is not a signal to commit — t
 readiness.
 
 ### Tangents
-I apply "slow is smooth, smooth is fast" to coding steps as well. If I see a small mess, my bias is towards fixing
+I apply "slow is smooth, smooth is fast" to coding steps as well. If I see a small regression, my bias is towards fixing
 it immediately, rather than let it grow into a big one. This means one planned step may often end up with multiple other
-changes attached. That's intentional.
+changes attached. That's intentional. This also applies to messes you spot: evidence that a past step's
+validation was skipped (e.g. a "done" step whose tests turn out to have silently broken elsewhere), or a
+linter/compiler/tool starting to emit warnings, gets the same default — pause and fix it as part of current work.
+Feel free to ask me if you're unsure or it seems like a lot of work.
+I knowingly make this choice even though it's contrary to typical industry practice (ticket it, keep moving).
+
+This also applies to non-regression messes that we notice while coding. Depending on the size, we might
+note them in a plan instead of pivoting to fix them immediately.
 
 ### Working-coordination plan docs are throwaway
 
