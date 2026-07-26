@@ -171,7 +171,7 @@ Describe "attachEntryInfo" {
 
     It "attaches the frontmatter next-step pointer" {
         $plan = newAttachPlan 'pointer' 'ready-to-implement'
-        $null = Set-PlanState -PlanFile $plan -NextStep 'Step 1: x'
+        $null = Set-PlanState -PlanFile $plan -First 'Step 1: x'
         $db = @([pscustomobject]@{planFile = $plan; cwd = "C:/de"; sessionIds = @()})
 
         attachEntryInfo $db

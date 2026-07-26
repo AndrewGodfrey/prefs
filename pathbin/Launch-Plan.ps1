@@ -74,7 +74,7 @@ function updateEntryInfo($entry) {
     $state     = $planState.State
     $resumable = @(getSessionInfos $entry.sessionIds -harness $entry.harness).Count -gt 0
     $entry | Add-Member -NotePropertyName state -NotePropertyValue $state -Force
-    $entry | Add-Member -NotePropertyName nextStep -NotePropertyValue $planState.NextStep -Force
+    $entry | Add-Member -NotePropertyName nextStep -NotePropertyValue $planState.First -Force
     $entry | Add-Member -NotePropertyName enterKind -NotePropertyValue (getLaunchAction $state $resumable $entry.planFile).kind -Force
 }
 
