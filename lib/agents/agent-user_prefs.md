@@ -118,8 +118,12 @@ there's actual time pressure. The end-of-turn summary describes what changed; I'
 decide the next step.
 
 For commit-prep specifically: don't ask "ready to commit?" or run git status/diff/log or the git
-skill without explicit instruction. "Tests pass" is not a signal to commit — the user signals
-readiness.
+skill without explicit instruction.
+
+Lifecycle transitions split by who owns the trigger. Objective, verifiable ones are yours to make
+once the fact holds — mark a step `/code-complete` yourself when tests are green. Approval ones are
+the user's — e.g. `/wrap` to close a step; don't push toward them or read "tests pass" as their
+trigger. (Commit is workflow-dependent — see "We work in parallel".)
 
 ### Tangents
 I apply "slow is smooth, smooth is fast" to coding steps as well. If I see a small regression, my bias is towards fixing
