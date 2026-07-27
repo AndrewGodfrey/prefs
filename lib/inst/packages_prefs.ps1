@@ -12,16 +12,6 @@ if ($MyInvocation.InvocationName -ne ".") {
         }
     }
 
-
-    $stage = $installationTracker.StartStage('marktext-uninstall')
-    $stage.NoteMigrationStep((Get-Date "2026-06-23"))
-    Remove-InteractiveAlias $stage 'mt'
-    if (Test-Path "$home\AppData\Local\Programs\MarkText\MarkText.exe") {
-        $stage.OnChange()
-        winget uninstall --id MarkText.MarkText --silent
-    }
-    $installationTracker.EndStage($stage)
-
     if ("pkg/winmerge" -notin $Suppress) {
         # WinMerge: used for move-block detection when reviewing Claude-assisted reorganizations.
         # Beyond Compare is the fallback for harder cases.
