@@ -159,13 +159,13 @@ Describe "attachEntryInfo" {
 
     It "attaches frontmatter state; a plan without frontmatter gets null" {
         $db = @(
-            [pscustomobject]@{planFile = (newAttachPlan 'with' 'code-complete'); cwd = "C:/de"; sessionIds = @()}
+            [pscustomobject]@{planFile = (newAttachPlan 'with' 'ready-for-user-review'); cwd = "C:/de"; sessionIds = @()}
             [pscustomobject]@{planFile = (newAttachPlan 'without' $null); cwd = "C:/de"; sessionIds = @()}
         )
 
         attachEntryInfo $db
 
-        $db[0].state | Should -Be 'code-complete'
+        $db[0].state | Should -Be 'ready-for-user-review'
         $db[1].state | Should -BeNullOrEmpty
     }
 
@@ -207,19 +207,29 @@ Describe "attachEntryInfo" {
 }
 
 Describe "displayState" {
-    It "shows state and next-step pointer when both are present" {
+    It "shows the display label and next-step pointer when both are present" {
         $entry = [pscustomobject]@{state = 'ready-to-implement'; nextStep = 'Step 5: model picker'}
-        displayState $entry | Should -Be 'ready-to-implement: Step 5: model picker'
+        displayState $entry | Should -Be 'coding: Step 5: model picker'
     }
 
-    It "falls back to state alone when there is no pointer" {
+    It "falls back to the display label alone when there is no pointer" {
         $entry = [pscustomobject]@{state = 'ready-to-plan'; nextStep = $null}
-        displayState $entry | Should -Be 'ready-to-plan'
+        displayState $entry | Should -Be 'planning'
     }
 
     It "shows a dash when neither state nor pointer is present" {
         $entry = [pscustomobject]@{state = $null; nextStep = $null}
         displayState $entry | Should -Be '-'
+    }
+
+    It "passes 'checkpointed' through unmapped, even with a pointer (not displayed as 'planning')" {
+        $entry = [pscustomobject]@{state = 'checkpointed'; nextStep = 'Step 2: beta'}
+        displayState $entry | Should -Be 'checkpointed: Step 2: beta'
+    }
+
+    It "maps ready-for-user-review to reviewing" {
+        $entry = [pscustomobject]@{state = 'ready-for-user-review'; nextStep = $null}
+        displayState $entry | Should -Be 'reviewing'
     }
 }
 
@@ -1023,15 +1033,15 @@ Describe "openProject" {
         $script:launched.rest     | Should -Contain "Please plan the next step in $plan"
     }
 
-    It "code-complete + no sessions: fresh launch with review prompt" {
-        $plan  = newPlan 'cc' 'code-complete'
+    It "ready-for-user-review + no sessions: fresh launch with review prompt" {
+        $plan  = newPlan 'cc' 'ready-for-user-review'
         $entry = newEntry $plan
         $db    = newDb $entry
 
         openProject $db $entry @()
 
         $joined = $script:launched.rest -join ' '
-        $joined | Should -Match 'code-complete'
+        $joined | Should -Match 'ready for your review'
         $joined | Should -Match 'review'
     }
 
@@ -1120,9 +1130,9 @@ Describe "openProject" {
         $script:pickerInitial | Should -Be $ExpectedInitial
     }
 
-    It "resumes for ready-to-plan and code-complete too when sessions exist" -TestCases @(
+    It "resumes for ready-to-plan and ready-for-user-review too when sessions exist" -TestCases @(
         @{ State = 'ready-to-plan' }
-        @{ State = 'code-complete' }
+        @{ State = 'ready-for-user-review' }
     ) {
         param($State)
         $plan  = newPlan "res-$State" $State
@@ -1377,11 +1387,11 @@ Describe "getLaunchAction" {
         $a.prompt | Should -Be 'Please do the next step in C:/p/x.md'
     }
 
-    It "code-complete, no sessions: fresh review prompt" {
-        $a = getLaunchAction 'code-complete' $false 'C:/p/x.md'
+    It "ready-for-user-review, no sessions: fresh review prompt" {
+        $a = getLaunchAction 'ready-for-user-review' $false 'C:/p/x.md'
 
         $a.kind   | Should -Be 'fresh'
-        $a.prompt | Should -Match 'code-complete'
+        $a.prompt | Should -Match 'ready for your review'
         $a.prompt | Should -Match 'review'
     }
 
@@ -1396,7 +1406,7 @@ Describe "getLaunchAction" {
     It "sessions present: resume, for each stored state except checkpointed" -TestCases @(
         @{ State = 'ready-to-plan' }
         @{ State = 'ready-to-implement' }
-        @{ State = 'code-complete' }
+        @{ State = 'ready-for-user-review' }
     ) {
         param($State)
         (getLaunchAction $State $true 'C:/p/x.md').kind | Should -Be 'resume'
@@ -1472,9 +1482,9 @@ Describe "defaultsToFreshPicker" {
         defaultsToFreshPicker 'ready-to-implement' | Should -BeTrue
     }
 
-    It "is false for ready-to-plan and code-complete (continue/approve the existing session)" -TestCases @(
+    It "is false for ready-to-plan and ready-for-user-review (continue/approve the existing session)" -TestCases @(
         @{ State = 'ready-to-plan' }
-        @{ State = 'code-complete' }
+        @{ State = 'ready-for-user-review' }
     ) {
         param($State)
         defaultsToFreshPicker $State | Should -BeFalse
@@ -1977,10 +1987,9 @@ Describe "changeState" {
     }
 
     It "writes the picked state to the plan file, not the db" -TestCases @(
-        @{ Key = 'P'; Expected = 'ready-to-plan';      Initial = 'code-complete' }
-        @{ Key = 'I'; Expected = 'ready-to-implement'; Initial = 'ready-to-plan' }
-        @{ Key = 'C'; Expected = 'code-complete';      Initial = 'ready-to-plan' }
-        @{ Key = 'K'; Expected = 'checkpointed';       Initial = 'ready-to-plan' }
+        @{ Key = 'P'; Expected = 'ready-to-plan';         Initial = 'ready-for-user-review' }
+        @{ Key = 'C'; Expected = 'ready-to-implement';    Initial = 'ready-to-plan' }
+        @{ Key = 'R'; Expected = 'ready-for-user-review'; Initial = 'ready-to-plan' }
     ) {
         param($Key, $Expected, $Initial)
         $plan  = newStatePlan "key-$Key" $Initial
@@ -2003,6 +2012,23 @@ Describe "changeState" {
         $db    = [System.Collections.Generic.List[object]]::new()
         $db.Add($entry)
         Mock readStateKey { return [pscustomobject]@{Key = 'Escape'} }
+
+        changeState $db $entry
+
+        (Get-PlanState -PlanFile $plan).State | Should -Be 'ready-to-plan'
+        Should -Invoke saveDb -Times 0
+    }
+
+    It "I and K are now inert (reused/retired keys from the old code-complete/checkpointed mapping)" -TestCases @(
+        @{ Key = 'I' }
+        @{ Key = 'K' }
+    ) {
+        param($Key)
+        $plan  = newStatePlan "inert-$Key" 'ready-to-plan'
+        $entry = [pscustomobject]@{planFile = $plan; cwd = "C:/de"; sessionIds = @(); state = 'ready-to-plan'}
+        $db    = [System.Collections.Generic.List[object]]::new()
+        $db.Add($entry)
+        Mock readStateKey { return [pscustomobject]@{Key = $Key} }
 
         changeState $db $entry
 

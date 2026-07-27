@@ -144,10 +144,15 @@ function runLauncher($db, $liveSessionIds, $orphans, $crossFlags, $notices, $ses
 }
 
 function displayState($entry) {
-    if ($entry.state -and $entry.nextStep) { return "$($entry.state): $($entry.nextStep)" }
-    if ($entry.state) { return $entry.state }
+    # 'checkpointed' passes through as itself — a plan can legitimately sit there between
+    # /wrap-session and the next launch, and the list should show it honestly rather than mapping
+    # it to "planning" via Get-PlanStageLabel's default arm.
+    $label = if ($entry.state -eq 'checkpointed') { 'checkpointed' } elseif ($entry.state) { Get-PlanStageLabel $entry.state } else { $null }
+    if ($label -and $entry.nextStep) { return "$($label): $($entry.nextStep)" }
+    if ($label) { return $label }
     return '-'
 }
+
 
 # TUI selection restore: index of $planFile in the (possibly rebuilt) db; top of list if absent.
 function indexOfPlan($db, [string] $planFile) {
@@ -227,7 +232,7 @@ function renderList($db, $selected, $liveSessionIds, $orphans, $crossFlags, $not
 
 # S is chiefly a repair tool for when something has gone wrong — normal state changes happen via
 # the agent's state script during sessions. It doubles as the sanctioned lightweight advance
-# gesture (S -> I) for skipping straight to ready-to-implement after a refine that needs no plan
+# gesture (S -> C) for skipping straight to ready-to-implement after a refine that needs no plan
 # review; that path bypasses /wrap's planning-close reflect, so use it sparingly.
 function changeState($db, $entry) {
     clearConsole
@@ -235,13 +240,12 @@ function changeState($db, $entry) {
     Write-Host ''
     Write-Host "  Current state: $(displayState $entry)"
     Write-Host ''
-    Write-Host '  New state:  [P] ready-to-plan  [I] ready-to-implement  [C] code-complete  [K] checkpointed  [Esc] cancel'
+    Write-Host '  New state:  [P] planning  [C] coding  [R] reviewing  [Esc] cancel'
     $key = readStateKey
     $newState = switch ($key.Key) {
         'P' { 'ready-to-plan' }
-        'I' { 'ready-to-implement' }
-        'C' { 'code-complete' }
-        'K' { 'checkpointed' }
+        'C' { 'ready-to-implement' }
+        'R' { 'ready-for-user-review' }
         default { $null }
     }
     if ($newState -and $newState -ne $entry.state) {
@@ -287,9 +291,9 @@ function getLaunchAction([string] $state, [bool] $hasResumableSessions, [string]
         return @{ kind = 'fresh'; prompt = "Please do the next step in $planFile"; setState = 'ready-to-implement' }
     }
     $prompt = switch ($state) {
-        'ready-to-implement' { "Please do the next step in $planFile" }
-        'code-complete'      { "$planFile's current step is code-complete. Please load context, to prepare for the user's review/testing." }
-        default              { "Please plan the next step in $planFile" }
+        'ready-to-implement'    { "Please do the next step in $planFile" }
+        'ready-for-user-review' { "$planFile is ready for your review. Please load context, to prepare for the user's review/testing." }
+        default                 { "Please plan the next step in $planFile" }
     }
     $kind = if ($hasResumableSessions) { 'resume' } else { 'fresh' }
     return @{ kind = $kind; prompt = $prompt; setState = $null }
@@ -305,7 +309,7 @@ function getFreshSessionArgs([string] $harness, $entry) {
 }
 
 # ready-to-implement's sessions are the spent planning ones, so the picker defaults to a fresh
-# session there; ready-to-plan and code-complete default to continuing/approving the existing one.
+# session there; ready-to-plan and ready-for-user-review default to continuing/approving the existing one.
 function defaultsToFreshPicker([string] $state) {
     return $state -eq 'ready-to-implement'
 }

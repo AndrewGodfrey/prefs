@@ -221,29 +221,6 @@ Describe "claude-statusline" {
         }
     }
 
-    Context "Get-PlanStageLabel" {
-        It "maps ready-to-plan to planning" {
-            Get-PlanStageLabel 'ready-to-plan' | Should -Be 'planning'
-        }
-
-        It "maps ready-to-implement to coding" {
-            Get-PlanStageLabel 'ready-to-implement' | Should -Be 'coding'
-        }
-
-        It "maps code-complete to reviewing" {
-            Get-PlanStageLabel 'code-complete' | Should -Be 'reviewing'
-        }
-
-        It "defaults checkpointed to planning (pl always resolves it before a session goes live)" {
-            Get-PlanStageLabel 'checkpointed' | Should -Be 'planning'
-        }
-
-        It "defaults null/unrecognized state to planning" {
-            Get-PlanStageLabel $null | Should -Be 'planning'
-            Get-PlanStageLabel 'made-up-state' | Should -Be 'planning'
-        }
-    }
-
     Context "CL_PLAN_FILE display" {
         It "shows the plan name (no extension) prefixed with its stage" {
             try {
@@ -266,9 +243,9 @@ Describe "claude-statusline" {
             }
         }
 
-        It "shows 'reviewing:' when the plan's state is code-complete" {
+        It "shows 'reviewing:' when the plan's state is ready-for-user-review" {
             try {
-                $env:CL_PLAN_FILE = writePlanFile 'review-plan.md' "---`r`ncurrent-step:`r`n  state: code-complete`r`n---`r`n"
+                $env:CL_PLAN_FILE = writePlanFile 'review-plan.md' "---`r`ncurrent-step:`r`n  state: ready-for-user-review`r`n---`r`n"
                 $out = Get-StatusLineString @{ cwd = $env:TEMP } $script:now -NoCwd
                 $out | Should -Match 'reviewing:review-plan'
             } finally {
@@ -282,6 +259,7 @@ Describe "claude-statusline" {
             $out | Should -Not -Match 'planning:|coding:|reviewing:'
         }
     }
+
 
     Context "no rate limits" {
         It "no rl section when rate_limits absent" {

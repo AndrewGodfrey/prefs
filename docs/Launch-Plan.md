@@ -9,7 +9,7 @@ Plan tracking is split across three ledgers with different owners:
 
 1. **Plan-file frontmatter (YAML)** — plan lifecycle state + next-step pointer. Git-synced with the plan.
    Written only by the state script (`prat/lib/agents/PlanState.ps1`, dot-sourced by pl), which the
-   agent invokes at deliberate boundaries via skills such as `/wrap`, `/wrap-session`, and `/code-complete`
+   agent invokes at deliberate boundaries via skills such as `/wrap`, `/wrap-session`, and `/ready-for-user-review`
    — the model never hand-edits these keys. Three keys:
    - `state` — lifecycle word (see table below);
    - `next-step` — step id + brief label;
@@ -23,20 +23,27 @@ Plan tracking is split across three ledgers with different owners:
 ## States and Enter dispatch
 
 Four stored states. Session existence is inferred (db `sessionIds` × resumable session files), never stored.
+The "Display label" column is the word shown in the TUI (`displayState`/`Get-PlanStageLabel`, in
+`prat/lib/agents/PlanState.ps1`) — a separate, shorter vocabulary from the stored state, meant for humans
+only; agents read/write the stored state.
 
 <!-- prettier-ignore -->
-| Stored state         | + no resumable session          | + resumable session(s)                            |
-|----------------------|---------------------------------|---------------------------------------------------|
-| `ready-to-plan`      | fresh planning launch           | picker; defaults to the *fresh* row               |
-| `ready-to-implement` | fresh "do the next step" launch | picker; defaults to the most-recent session       |
-| `code-complete`      | fresh review launch             | picker; defaults to the most-recent session       |
-| `checkpointed`       | consumed → fresh implement launch | same — old sessions are reference-only            |
+| Stored state             | Display label | + no resumable session             | + resumable session(s)                      |
+|---------------------------|----------------|-------------------------------------|-----------------------------------------------|
+| `ready-to-plan`           | planning       | fresh planning launch               | picker; defaults to the *fresh* row          |
+| `ready-to-implement`      | coding         | fresh "do the next step" launch     | picker; defaults to the most-recent session  |
+| `ready-for-user-review`   | reviewing      | fresh review launch                 | picker; defaults to the most-recent session  |
+| `checkpointed`            | *(shown as-is, not mapped)* | consumed → fresh implement launch | same — old sessions are reference-only |
+
+`checkpointed` is only reachable via `/wrap-session` — the `S` picker no longer offers it (dropped
+2026-07-28; the state and its consume-and-flip machinery are unchanged, only the manual shim is gone).
 
 `getLaunchAction` is the pure dispatch function: state + session availability → kind (`fresh`/`resume`) +
 the state's fresh-launch prompt. Missing or unrecognized state is treated as `ready-to-plan`. The
 `checkpointed` consume-and-flip (set by `/wrap-session`) is executed by `openProject` as a plan-file write
 before the fresh session launches — a rare but meaningful launcher write to the plan file; the old sessions
 stay in `sessionIds`, they just stop auto-resuming.
+
 
 ## Main view
 
@@ -97,9 +104,9 @@ session id.
   session id.
 - **S — change state**: chiefly a repair tool for when something has gone wrong — normal state changes
   happen via the agent's state script during sessions. It doubles as the sanctioned lightweight advance
-  gesture (`S` → `I`) for skipping straight to `ready-to-implement` after a refine that needs no plan
-  review; that path bypasses `/wrap`'s planning-close reflect, so use it sparingly. Writes through
-  `Set-PlanState`. Blocked while a session is live.
+  gesture (`S` → `C`) for skipping straight to `ready-to-implement` after a refine that needs no plan
+  review; that path bypasses `/wrap`'s planning-close reflect, so use it sparingly. Menu: `[P] planning
+  [C] coding [R] reviewing`. Writes through `Set-PlanState`. Blocked while a session is live.
 - **V — view plan**: opens the selected plan file via `Open-FileInEditor` (the `e` alias's target;
   prat-deployed, so available in the interactive profile pl runs under). No-op if that alias isn't
   installed.

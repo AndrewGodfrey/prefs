@@ -2,17 +2,6 @@ param([switch] $NoCwd)
 Import-Module "$home\prat\lib\PratBase\PratBase.psd1" -ErrorAction SilentlyContinue
 . "$home/prat/lib/agents/PlanState.ps1"
 
-# Maps plan lifecycle state to the statusline's stage label. 'checkpointed' is transient — pl
-# always resolves it to ready-to-implement before a session goes live (see getLaunchAction in
-# Launch-Plan.ps1) — so it, like a missing/unrecognized state, falls back to "planning".
-function Get-PlanStageLabel([string] $state) {
-    switch ($state) {
-        'ready-to-implement' { 'coding' }
-        'code-complete'      { 'reviewing' }
-        default              { 'planning' }
-    }
-}
-
 # Returns a formatted rate-limit display string, or nothing if the window is too new or too close to reset.
 # Color: yellow-green = on pace to exhaust; yellow = within $yellowThresholdMins; orange = within $redThresholdMins; red = completely out.
 function Get-RateLimitDisplay($window, $label, $barWidth, $totalMins, $yellowThresholdMins, $redThresholdMins, $minMinsLeft, $now) {
