@@ -50,6 +50,10 @@ a skill or instruction refers to "the active plan", that variable is the default
 explicit statement from me overrides it. Execution tools that run as a different user (e.g. a
 sandbox over SSH) don't inherit it — pass the plan path explicitly when scripting through one.
 
+Don't create or maintain a harness-provided per-session plan scaffold (e.g. a session-state
+`plan.md` the harness offers to track progress in) — I don't derive value from it. Coordinate
+via my own plan files (`$env:CL_PLAN_FILE` / the active plan) instead.
+
 ### Saving to memory
 
 Always invoke the `remember` skill when saving anything to memory — corrections, domain knowledge,
