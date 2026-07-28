@@ -292,7 +292,7 @@ function getLaunchAction([string] $state, [bool] $hasResumableSessions, [string]
     }
     $prompt = switch ($state) {
         'ready-to-implement'    { "Please do the next step in $planFile" }
-        'ready-for-user-review' { "$planFile is ready for your review. Please load context, to prepare for the user's review/testing." }
+        'ready-for-user-review' { "$planFile is ready for user review. Please read the plan, then wait for the user's review/testing." }
         default                 { "Please plan the next step in $planFile" }
     }
     $kind = if ($hasResumableSessions) { 'resume' } else { 'fresh' }
