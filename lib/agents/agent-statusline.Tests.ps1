@@ -193,6 +193,11 @@ Describe "claude-statusline" {
     }
 
     Context "CL_LAUNCH_CWD precedence" {
+        # Save/restore rather than Remove-Item: CL_LAUNCH_CWD is set in a real `cl` session, and
+        # Pester runs in-process, so an unguarded write leaks into the shell that ran `t`.
+        BeforeEach { $script:savedEnv = Save-Env @('CL_LAUNCH_CWD') }
+        AfterEach  { Restore-Env $script:savedEnv }
+
         It "prefers CL_LAUNCH_CWD over the json cwd when set" {
             $jsonCwd   = Join-Path $env:TEMP "statusline-test-json-$([guid]::NewGuid().ToString('N'))"
             $launchCwd = Join-Path $env:TEMP "statusline-test-launch-$([guid]::NewGuid().ToString('N'))"
@@ -203,7 +208,6 @@ Describe "claude-statusline" {
                 $out | Should -Match ([regex]::Escape($launchCwd))
                 $out | Should -Not -Match ([regex]::Escape($jsonCwd))
             } finally {
-                Remove-Item Env:\CL_LAUNCH_CWD -ErrorAction SilentlyContinue
                 Remove-Item $jsonCwd, $launchCwd -Recurse -Force -ErrorAction SilentlyContinue
             }
         }
@@ -222,35 +226,27 @@ Describe "claude-statusline" {
     }
 
     Context "CL_PLAN_FILE display" {
+        # CL_PLAN_FILE names the active plan in a real session — save/restore, don't just unset.
+        BeforeEach { $script:savedEnv = Save-Env @('CL_PLAN_FILE') }
+        AfterEach  { Restore-Env $script:savedEnv }
+
         It "shows the plan name (no extension) prefixed with its stage" {
-            try {
-                $env:CL_PLAN_FILE = writePlanFile 'myplan-upgrade.md' "# Title`r`n`r`nbody`r`n"
-                $out = Get-StatusLineString @{ cwd = $env:TEMP } $script:now -NoCwd
-                $out | Should -Match 'planning:myplan-upgrade'
-                $out | Should -Not -Match 'myplan-upgrade\.md'
-            } finally {
-                Remove-Item Env:\CL_PLAN_FILE -ErrorAction SilentlyContinue
-            }
+            $env:CL_PLAN_FILE = writePlanFile 'myplan-upgrade.md' "# Title`r`n`r`nbody`r`n"
+            $out = Get-StatusLineString @{ cwd = $env:TEMP } $script:now -NoCwd
+            $out | Should -Match 'planning:myplan-upgrade'
+            $out | Should -Not -Match 'myplan-upgrade\.md'
         }
 
         It "shows 'coding:' when the plan's state is ready-to-implement" {
-            try {
-                $env:CL_PLAN_FILE = writePlanFile 'coding-plan.md' "---`r`ncurrent-step:`r`n  state: ready-to-implement`r`n---`r`n"
-                $out = Get-StatusLineString @{ cwd = $env:TEMP } $script:now -NoCwd
-                $out | Should -Match 'coding:coding-plan'
-            } finally {
-                Remove-Item Env:\CL_PLAN_FILE -ErrorAction SilentlyContinue
-            }
+            $env:CL_PLAN_FILE = writePlanFile 'coding-plan.md' "---`r`ncurrent-step:`r`n  state: ready-to-implement`r`n---`r`n"
+            $out = Get-StatusLineString @{ cwd = $env:TEMP } $script:now -NoCwd
+            $out | Should -Match 'coding:coding-plan'
         }
 
         It "shows 'reviewing:' when the plan's state is ready-for-user-review" {
-            try {
-                $env:CL_PLAN_FILE = writePlanFile 'review-plan.md' "---`r`ncurrent-step:`r`n  state: ready-for-user-review`r`n---`r`n"
-                $out = Get-StatusLineString @{ cwd = $env:TEMP } $script:now -NoCwd
-                $out | Should -Match 'reviewing:review-plan'
-            } finally {
-                Remove-Item Env:\CL_PLAN_FILE -ErrorAction SilentlyContinue
-            }
+            $env:CL_PLAN_FILE = writePlanFile 'review-plan.md' "---`r`ncurrent-step:`r`n  state: ready-for-user-review`r`n---`r`n"
+            $out = Get-StatusLineString @{ cwd = $env:TEMP } $script:now -NoCwd
+            $out | Should -Match 'reviewing:review-plan'
         }
 
         It "shows no plan segment when CL_PLAN_FILE is unset" {

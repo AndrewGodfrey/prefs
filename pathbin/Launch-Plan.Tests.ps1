@@ -1041,8 +1041,8 @@ Describe "openProject" {
         openProject $db $entry @()
 
         $joined = $script:launched.rest -join ' '
-        $joined | Should -Match 'ready for your review'
-        $joined | Should -Match 'review'
+        $joined | Should -Match 'is ready for user review'
+        $joined | Should -Match "wait for the user's review/testing"
     }
 
     It "no frontmatter: treated as ready-to-plan" {
@@ -1391,8 +1391,8 @@ Describe "getLaunchAction" {
         $a = getLaunchAction 'ready-for-user-review' $false 'C:/p/x.md'
 
         $a.kind   | Should -Be 'fresh'
-        $a.prompt | Should -Match 'ready for your review'
-        $a.prompt | Should -Match 'review'
+        $a.prompt | Should -Match 'is ready for user review'
+        $a.prompt | Should -Match "wait for the user's review/testing"
     }
 
     It "missing or unknown state: treated as ready-to-plan" -TestCases @(
