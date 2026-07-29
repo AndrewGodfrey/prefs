@@ -169,6 +169,9 @@ no reference to what it used to be or what an earlier pass assumed.
 Dates of evidence-gathering are OK ("as of 2026-05-28, no internal readers exist") — those mark
 data freshness, not a decision reversal.
 
+When a design changes mid-session, re-read the comments written before the change: they are the
+likeliest to be both historical *and* wrong, since they describe a mechanism that no longer exists.
+
 ### Reading repo source — don't trust a stale clone
 
 When I need a repo's code and a local clone may be stale, don't reason off the old code. First, check
