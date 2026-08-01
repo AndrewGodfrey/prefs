@@ -10,7 +10,7 @@ if ($MyInvocation.InvocationName -ne ".") {
     # 2.1.220 - bumped to 219 to pick up Opus 5, then one more because it was a fast 'bug fix release'.
     Set-ClaudePinnedVersion "2.1.220"
 
-    foreach ($packageId in @("pwsh", "wget", "df", "ditto", "sysinternals", "claude", "gh", "python", "nuget", "powertoys")) {
+    foreach ($packageId in @("pwsh", "wget", "df", "ditto", "sysinternals", "claude", "gh", "python", "nuget", "powertoys", "ripgrep")) {
         if ("pkg/$packageId" -notin $Suppress) {
             Install-PratPackage $installationTracker $packageId
         }

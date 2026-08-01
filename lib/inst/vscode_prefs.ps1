@@ -17,20 +17,6 @@ function setVscodeColorTheme([string] $content, [string] $filename) {
     return setVscodeJsonPropertyValue $content @("workbench.colorTheme") "`"Dark Modern`"" $filename
 }
 
-# Finds the ripgrep bundled inside a VS Code installation.
-# VS Code ships rg.exe under a version-hash subdir whose exact path varies
-# $installRoots is tried in order; the first root containing an @vscode ripgrep wins.
-function findVscodeRipgrep([string[]] $installRoots) {
-    foreach ($root in $installRoots) {
-        if (-not (Test-Path $root)) { continue }
-        $found = Get-ChildItem -Path $root -Recurse -Filter 'rg.exe' -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match '@vscode[\\/]ripgrep' } |
-            Select-Object -First 1
-        if ($found) { return $found.FullName }
-    }
-    return $null
-}
-
 if ($MyInvocation.InvocationName -eq ".") { return }
 
 $stage = $installationTracker.StartStage('vscode')
@@ -94,13 +80,9 @@ Here's a best-effort list of extensions and settings I set up ... which are now 
   - ranyitz.search-presets - Ctrl-Alt-F to use.
 #>
 
-# Time to hack! Since vscode installs a copy of ripgrep, just use that one.
-
-$rgPath = findVscodeRipgrep @("$env:localappdata\Programs\Microsoft VS Code", "C:\Program Files\Microsoft VS Code")
-if (-not $rgPath) {
-  Write-Warning "ripgrep not found in any known VS Code install location."
-} else {
-  Install-InteractiveAlias $stage 'rg' $rgPath
-}
+# Migration: 'rg' used to alias VS Code's bundled ripgrep copy; it's now a standalone package (see
+# instPackages.ps1's `ripgrep` entry), so the alias just shadows PATH and must go, not be repointed.
+$stage.NoteMigrationStep((Get-Date "2026-07-30"))
+Remove-InteractiveAlias $stage 'rg'
 
 $installationTracker.EndStage($stage)
