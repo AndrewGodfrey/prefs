@@ -49,10 +49,12 @@ Describe "loadDb" {
         $result | Should -HaveCount 0
     }
 
-    It "defaults harness to claude when absent (legacy entries)" {
+    It "uses default harness when absent (legacy entries)" {
+        Mock getDefaultHarness { return 'customtool' }
+
         Set-Content "TestDrive:\db-load-harness1.json" '[{"planFile":"p.md","cwd":"C:/de","sessionIds":[]}]'
 
-        (loadDb "TestDrive:\db-load-harness1.json")[0].harness | Should -Be 'claude'
+        (loadDb "TestDrive:\db-load-harness1.json")[0].harness | Should -Be 'customtool'
     }
 
     It "preserves an explicit harness value" {
@@ -1740,7 +1742,9 @@ Describe "registerProject" {
         Should -Invoke saveDb -Times 0
     }
 
-    It "defaults harness to claude when no sessionHarness map is given" {
+    It "uses default harness when no sessionHarness map is given" {
+        Mock getDefaultHarness { return 'customtool' }
+
         $db    = [System.Collections.Generic.List[object]]::new()
         $entry = [pscustomobject]@{planFile = "C:/plans/foo.md"; cwd = "C:/de"; sessionIds = @()}
         $db.Add($entry)
@@ -1751,7 +1755,7 @@ Describe "registerProject" {
 
         registerProject $db $orphans $live
 
-        $entry.harness | Should -Be 'claude'
+        $entry.harness | Should -Be 'customtool'
     }
 
     It "stamps harness from the sessionHarness map onto an already-tracked entry" {
