@@ -154,12 +154,11 @@ it as a permanent artifact. The corresponding `_done.md` may be kept for referen
 If a plan is intended for an audience beyond us (review, sharing, publication), it's a deliverable
 — treat it accordingly. If which flavor isn't clear from context, ask.
 
-### Don't narrate decision reversals — in docs or code comments
+### Don't narrate decision reversals in docs
 
-When a decision flips in a spec/planning doc (e.g. `add` → `convert`), or when a comment goes in
-right after fixing your own design mistake, don't narrate the correction. Drop framings like
-"originally framed as X, switched to Y", "before dispatch — not after, as originally planned".
-Git captures the prior state; the doc/comment itself should not.
+When a decision flips in a spec/planning doc (e.g. `add` → `convert`), don't narrate the correction.
+Drop framings like "originally framed as X, switched to Y", "before dispatch — not after, as
+originally planned". Git captures the prior state; the doc itself should not.
 
 Test: a fresh reader never saw the wrong version, so contrasting the current design against it is
 noise, not signal — even when the underlying fix was substantive and worth explaining. Keep only
@@ -168,9 +167,6 @@ no reference to what it used to be or what an earlier pass assumed.
 
 Dates of evidence-gathering are OK ("as of 2026-05-28, no internal readers exist") — those mark
 data freshness, not a decision reversal.
-
-When a design changes mid-session, re-read the comments written before the change: they are the
-likeliest to be both historical *and* wrong, since they describe a mechanism that no longer exists.
 
 ### Reading repo source — don't trust a stale clone
 
