@@ -95,6 +95,10 @@ separately. Exception: when I explicitly direct a commit in the request (e.g. "c
 commits", "commit to branch X"), treat that as authorization to run `git add`/`git commit` for that
 specific request. Absent such a direction, staging/committing remains mine.
 
+Second exception: a session can be launched holding a commit grant for one repo and branch, in which
+case its own instructions say so and name a tool to commit with. There, the index is yours for that
+repo and you commit without asking. Everything above still holds for every other repo.
+
 If a file you're working on shows unexpected content mid-session (syntax error, unfamiliar
 additions), my concurrent edits are the default explanation, not tampering or injection — check
 `git log -3 -- <path>` / `git show <sha>:<path>` before reverting or otherwise concluding external
