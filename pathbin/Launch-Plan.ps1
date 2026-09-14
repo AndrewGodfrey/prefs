@@ -599,8 +599,8 @@ function getAvailablePlanFiles([string] $plansDir) {
         Where-Object {
             $rel      = (normalizePath $_.FullName).Substring($base.Length + 1)
             $baseName = [System.IO.Path]::GetFileNameWithoutExtension($_.Name)
-            ($rel -notmatch '(^|/)done/') -and ($baseName -notmatch '_(done|ref|background)$')
-        } |
+            ($rel -notmatch '(^|/)(done|paused|waiting|later)/') -and ($baseName -notmatch '_(done|ref|background)$')
+        }
         Select-Object -ExpandProperty FullName |
         ForEach-Object { normalizePath $_ })
 }
