@@ -2120,3 +2120,83 @@ Describe "changeHarness" {
         Should -Invoke saveDb -Times 0
     }
 }
+
+Describe "getErrorLogPath" {
+    It "points at a file under prat/auto/context" {
+        getErrorLogPath | Should -Match 'prat[/\\]auto[/\\]context[/\\]launch-plan-errors\.log$'
+    }
+}
+
+Describe "getNewErrorRecords" {
+    It "returns an empty array when the error count hasn't changed" {
+        $Error.Clear()
+        try { throw 'seed' } catch { }
+
+        @(getNewErrorRecords $Error.Count) | Should -HaveCount 0
+    }
+
+    It "returns records added since the prior count, oldest first" {
+        $Error.Clear()
+        try { throw 'seed' } catch { }
+        $priorCount = $Error.Count
+        try { throw 'second' } catch { }
+        try { throw 'third' } catch { }
+
+        $result = getNewErrorRecords $priorCount
+
+        $result.Count                    | Should -Be 2
+        $result[0].Exception.Message     | Should -Be 'second'
+        $result[1].Exception.Message     | Should -Be 'third'
+    }
+}
+
+Describe "formatErrorRecord" {
+    It "includes the error message" {
+        $Error.Clear()
+        try { throw 'boom' } catch { }
+
+        formatErrorRecord $Error[0] | Should -Match 'boom'
+    }
+
+    It "handles a record with no script stack trace" {
+        $exception  = New-Object System.Exception('boom-no-stack')
+        $errorRecord = New-Object System.Management.Automation.ErrorRecord(
+            $exception, 'id', [System.Management.Automation.ErrorCategory]::NotSpecified, $null)
+
+        formatErrorRecord $errorRecord | Should -Match 'boom-no-stack'
+    }
+}
+
+Describe "appendErrorLog" {
+    It "does nothing when there are no records" {
+        $path = "TestDrive:\errlog-empty.log"
+
+        appendErrorLog @() $path
+
+        Test-Path $path | Should -BeFalse
+    }
+
+    It "creates parent directories and writes the formatted record" {
+        $path = "TestDrive:/errlog-sub/nested/errors.log"
+        $Error.Clear()
+        try { throw 'boom' } catch { }
+
+        appendErrorLog @($Error[0]) $path
+
+        Test-Path $path | Should -BeTrue
+        (Get-Content $path -Raw) | Should -Match 'boom'
+    }
+
+    It "appends to an existing file rather than overwriting it" {
+        $path = "TestDrive:\errlog-append.log"
+        Set-Content $path 'existing line'
+        $Error.Clear()
+        try { throw 'boom2' } catch { }
+
+        appendErrorLog @($Error[0]) $path
+
+        $content = Get-Content $path -Raw
+        $content | Should -Match 'existing line'
+        $content | Should -Match 'boom2'
+    }
+}

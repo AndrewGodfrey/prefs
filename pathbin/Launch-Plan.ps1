@@ -89,6 +89,8 @@ function runLauncher($db, $liveSessionIds, $orphans, $crossFlags, $notices, $ses
         renderList $db $selected $liveSessionIds $orphans $crossFlags $notices $transientError
         $transientError = $null
         $key = [Console]::ReadKey($true)
+        $errCountBefore = $Error.Count
+        try {
         switch ($key.Key) {
             'UpArrow'   { $selected = if ($selected -gt 0) { $selected - 1 } else { [Math]::Max(0, $db.Count - 1) } }
             'DownArrow' { $selected = if ($selected -lt ($db.Count - 1)) { $selected + 1 } else { 0 } }
@@ -139,6 +141,16 @@ function runLauncher($db, $liveSessionIds, $orphans, $crossFlags, $notices, $ses
                 }
             }
             { $_ -in 'Q', 'q', 'Escape' } { [Console]::Clear(); return $null }
+        }
+        } catch {
+            # Swallowed here — surfaced via the $Error-based check below, which also catches
+            # non-terminating errors (e.g. from Get-ChildItem) that never reach this catch.
+        } finally {
+            $newErrors = getNewErrorRecords $errCountBefore
+            if ($newErrors.Count -gt 0) {
+                appendErrorLog $newErrors
+                $transientError = "$($newErrors.Count) error(s) during that action — see $(getErrorLogPath)"
+            }
         }
     }
 }
@@ -226,6 +238,35 @@ function renderList($db, $selected, $liveSessionIds, $orphans, $crossFlags, $not
         Write-Host ''
         Write-Host "  ✗ $transientError" -ForegroundColor Red
     }
+}
+
+# --- Error diagnostics ---
+
+# A key-handler action's own errors (thrown or merely written to the error stream) get wiped by the
+# TUI's next screen clear before they can be read — logged here instead. Read with:
+#   Get-Content (getErrorLogPath) -Tail 40
+function getErrorLogPath { return "$home/prat/auto/context/launch-plan-errors.log" }
+
+# $Error is newest-first; returns the records added since $priorCount, oldest-first.
+function getNewErrorRecords([int] $priorCount) {
+    if ($Error.Count -le $priorCount) { return @() }
+    $records = @($Error.GetRange(0, $Error.Count - $priorCount))
+    [array]::Reverse($records)
+    return ,$records
+}
+
+function formatErrorRecord($errorRecord) {
+    $ts    = Get-Date -Format 'o'
+    $stack = if ($errorRecord.ScriptStackTrace) { "`n$($errorRecord.ScriptStackTrace)" } else { '' }
+    return "[$ts] $($errorRecord.ToString())$stack"
+}
+
+function appendErrorLog($errorRecords, [string] $logPath = (getErrorLogPath)) {
+    if (@($errorRecords).Count -eq 0) { return }
+    $null = New-Item -ItemType Directory -Path (Split-Path $logPath) -Force
+    # -Path, not -LiteralPath: LiteralPath skips provider-path normalization and drops a
+    # multi-character PSDrive prefix (e.g. Pester's TestDrive:) when the target file is new.
+    (@($errorRecords) | ForEach-Object { formatErrorRecord $_ }) -join "`n`n" | Add-Content -Path $logPath -Encoding UTF8
 }
 
 # --- Actions ---
