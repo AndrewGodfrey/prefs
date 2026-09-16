@@ -1601,6 +1601,14 @@ Describe "getSessionInfos (custom harness)" {
         @($infos.sid) | Should -Be @('sid-a')
     }
 
+    It "doesn't record an error for a missing jsonl file (expected, not exceptional)" {
+        $Error.Clear()
+
+        $null = getSessionInfos @('sid-missing') 'unused' 'customtool'
+
+        $Error.Count | Should -Be 0
+    }
+
     It "uses the first user_message event's content as the summary" {
         $infos = @(getSessionInfos @('sid-a') 'unused' 'customtool')
 
@@ -1833,6 +1841,11 @@ Describe "getAvailablePlanFiles" {
         $names | Should -Not -Contain 'foo_ref.md'
         $names | Should -Not -Contain 'foo_background.md'
         $names | Should -Not -Contain 'baz_background.md'
+    }
+
+    It "returns full path strings rather than FileInfo objects" {
+        $result = getAvailablePlanFiles $script:plansDir
+        $result | ForEach-Object { $_ | Should -BeOfType [string] }
     }
 }
 

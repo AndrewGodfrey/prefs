@@ -14,7 +14,7 @@ $dbPath = "$home/prat/auto/context/db.json"
 
 function main {
     saveConsoleMode
-    Import-Module "$home/prat/lib/PratBase/PratBase.psd1" -ErrorAction SilentlyContinue
+    Import-Module "$home/prat/lib/PratBase/PratBase.psd1" -ErrorAction Ignore
 
     $lastPlan = $null
     while ($true) {
@@ -531,7 +531,7 @@ function launchCl([string] $harness, [string] $cwd, [string] $planFile) {
 # Thin wrapper so tests can mock it. Absent for non-de users / when the editor alias isn't
 # installed — a no-op in that case, matching Get-AgentModelList's optional-command pattern.
 function openInEditor([string] $path) {
-    $cmd = Get-Command Open-FileInEditor -ErrorAction SilentlyContinue
+    $cmd = Get-Command Open-FileInEditor -ErrorAction Ignore
     if ($cmd) { & $cmd $path }
 }
 
@@ -571,7 +571,7 @@ function getSessionInfos($sessionIds, [string] $projectsRoot = "$home/.claude/pr
 function getClaudeSessionInfos($sessionIds, [string] $projectsRoot) {
     $infos = @()
     foreach ($sid in @($sessionIds | Where-Object { $_ })) {
-        $jsonl = @(Get-ChildItem -Path "$projectsRoot/*/$sid.jsonl" -File -ErrorAction SilentlyContinue) | Select-Object -First 1
+        $jsonl = @(Get-ChildItem -Path "$projectsRoot/*/$sid.jsonl" -File -ErrorAction Ignore) | Select-Object -First 1
         if (-not $jsonl) { continue }
         $infos += [pscustomobject]@{
             sid        = $sid
@@ -588,7 +588,7 @@ function getClaudeSessionInfos($sessionIds, [string] $projectsRoot) {
 function getFlatSessionInfos($sessionIds, [string] $sessionsDir) {
     $infos = @()
     foreach ($sid in @($sessionIds | Where-Object { $_ })) {
-        $jsonl = Get-Item -LiteralPath "$sessionsDir/$sid.jsonl" -ErrorAction SilentlyContinue
+        $jsonl = Get-Item -LiteralPath "$sessionsDir/$sid.jsonl" -ErrorAction Ignore
         if (-not $jsonl) { continue }
         $infos += [pscustomobject]@{
             sid        = $sid
@@ -641,7 +641,7 @@ function getAvailablePlanFiles([string] $plansDir) {
             $rel      = (normalizePath $_.FullName).Substring($base.Length + 1)
             $baseName = [System.IO.Path]::GetFileNameWithoutExtension($_.Name)
             ($rel -notmatch '(^|/)(done|paused|waiting|later)/') -and ($baseName -notmatch '_(done|ref|background)$')
-        }
+        } |
         Select-Object -ExpandProperty FullName |
         ForEach-Object { normalizePath $_ })
 }
@@ -811,7 +811,7 @@ function saveDb($db, [string] $path) {
 # Thin wrapper (mockable in tests) over the process command-line query, parameterized by process
 # name so claude.exe and copilot.exe scans share this one implementation.
 function getLiveHarnessProcs([string] $processName) {
-    Get-CimInstance Win32_Process -Filter "Name='$processName'" -ErrorAction SilentlyContinue |
+    Get-CimInstance Win32_Process -Filter "Name='$processName'" -ErrorAction Ignore |
         ForEach-Object { [pscustomobject]@{ CommandLine = $_.CommandLine } }
 }
 
@@ -950,7 +950,7 @@ function getHarnessDescriptors {
 # invocation. Unlike Get-AgentHarnesses this one is genuinely optional: non-de users and unlisted
 # harnesses see no command on PATH, so this returns $null rather than throwing.
 function tryInvokeAgentModelList {
-    $cmd = Get-Command Get-AgentModelList -ErrorAction SilentlyContinue
+    $cmd = Get-Command Get-AgentModelList -ErrorAction Ignore
     if (-not $cmd) { return $null }
     return & Get-AgentModelList
 }
@@ -1014,9 +1014,9 @@ function getCrossMachineFlags([string] $syncPath) {
     if (-not (Test-Path $trackingDir)) { return @() }
     $cutoff  = (Get-Date).AddDays(-7)
     $flagged = @()
-    foreach ($file in Get-ChildItem $trackingDir -Filter '*.json' -ErrorAction SilentlyContinue) {
+    foreach ($file in Get-ChildItem $trackingDir -Filter '*.json' -ErrorAction Ignore) {
         if ($file.BaseName -eq $env:COMPUTERNAME) { continue }
-        $other = Get-Content $file.FullName -Raw | ConvertFrom-Json -ErrorAction SilentlyContinue
+        $other = Get-Content $file.FullName -Raw | ConvertFrom-Json -ErrorAction Ignore
         if (-not $other -or -not $other.plans) { continue }
         # If lastSeen is present and older than 7 days, treat as stale — skip.
         # Missing lastSeen (older format) is treated as recent for backward compatibility.
@@ -1028,15 +1028,15 @@ function getCrossMachineFlags([string] $syncPath) {
 }
 
 function getPlansDir {
-    Import-Module "$home/prat/lib/PratBase/PratBase.psd1" -ErrorAction SilentlyContinue
-    $configScript = Resolve-PratLibFile 'lib/agents/Get-PlansDir.ps1' -ErrorAction SilentlyContinue
+    Import-Module "$home/prat/lib/PratBase/PratBase.psd1" -ErrorAction Ignore
+    $configScript = Resolve-PratLibFile 'lib/agents/Get-PlansDir.ps1' -ErrorAction Ignore
     if ($configScript) { return & $configScript }
     return $null
 }
 
 function getSyncPath {
-    Import-Module "$home/prat/lib/PratBase/PratBase.psd1" -ErrorAction SilentlyContinue
-    $configScript = Resolve-PratLibFile 'lib/agents/Get-PlanTrackingConfig.ps1' -ErrorAction SilentlyContinue
+    Import-Module "$home/prat/lib/PratBase/PratBase.psd1" -ErrorAction Ignore
+    $configScript = Resolve-PratLibFile 'lib/agents/Get-PlanTrackingConfig.ps1' -ErrorAction Ignore
     if (-not $configScript) {
         return @{ path = $null; notice = 'No sync-backed path configured — cross-machine visibility unavailable. (Suppress with -NoSyncBackedWarning)' }
     }
