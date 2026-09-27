@@ -1,12 +1,21 @@
+# PositionalBinding=$false plus the ValueFromRemainingArguments catch-all: passthrough tokens (a
+# prompt, `--model haiku`, `--resume <sid>`) reach $PassThroughArgs whatever order they arrive in, so
+# a parameter added here can never capture one positionally.
+[CmdletBinding(PositionalBinding = $false)]
 param(
     [string]      $Harness,
     [scriptblock] $LaunchHook,
-    [hashtable]   $Context
+    [hashtable]   $Context,
+    # The commit grant this launch was given: both or neither, as pl resolved them from the plan's
+    # frontmatter. Generic names — the translation into a harness's own CLI happens below.
+    [string]      $CommitBranch,
+    [string[]]    $CommitRepo,
+    [Parameter(ValueFromRemainingArguments = $true)] [string[]] $PassThroughArgs
 )
 
 $resumeSid = $null
-for ($i = 0; $i -lt $ARGS.Count - 1; $i++) {
-    if ($ARGS[$i] -eq '--resume') { $resumeSid = $ARGS[$i + 1]; break }
+for ($i = 0; $i -lt $PassThroughArgs.Count - 1; $i++) {
+    if ($PassThroughArgs[$i] -eq '--resume') { $resumeSid = $PassThroughArgs[$i + 1]; break }
 }
 
 # Prefs's own knowledge of claude's and pi's args — the only harness-specific data hardcoded in this
@@ -35,11 +44,46 @@ function getHarnessDescriptor([string] $harness) {
     return @(Get-AgentHarnesses | Where-Object { $_ -and $_.name -eq $harness }) | Select-Object -First 1
 }
 
+# What a harness with no commit tool is told instead of flags. Says when to commit as well as what is
+# granted: one commit per step is what makes the branch reviewable a step at a time, and a model
+# handed the rights has no way to infer that.
+function getCommitGrantProse([string] $branch, [string[]] $repoPaths) {
+    $repos = @($repoPaths) -join ', '
+    return @(
+        '# Git commits'
+        ''
+        "This session may commit on branch $branch, in $repos. For those repos the index (staging area) is yours " +
+        'for this session, in place of the standing rule that it belongs to the user, and committing needs no ' +
+        'permission. Commit at each wrap boundary, after the wrap checks pass: one commit per step, so the branch ' +
+        'reads back one step at a time. Everything else about git state is unchanged: no push, no amend, no ' +
+        'rebase, no branch switch, and no other repo.'
+    ) -join "`n"
+}
+
 $harnessDescriptor = getHarnessDescriptor $Harness
 
 $ctxArgs = @()
 if ($Context.targetRepo -and (($Harness -eq 'copilot') -or ($harnessDescriptor -and $harnessDescriptor.supportsAddDir))) {
     $ctxArgs = @('--add-dir', $Context.targetRepo)
+}
+
+# The grant reaches the harness one of two ways. A descriptor declaring `commitGrantArgs` renders its
+# own flags, and having taken the grant that way it writes its own account of it for the model; every
+# other harness is told in prose, appended to the context message both delivery paths below already
+# carry.
+$contextMessage = $Context.contextMessage
+$grantArgs      = @()
+if ($CommitBranch -or $CommitRepo) {
+    if (-not ($CommitBranch -and $CommitRepo)) {
+        throw "A commit grant needs both -CommitBranch and -CommitRepo (got branch '$CommitBranch' and $(@($CommitRepo).Count) repo(s))."
+    }
+    if ($harnessDescriptor -and $harnessDescriptor.commitGrantArgs) {
+        $grantArgs = @(& $harnessDescriptor.commitGrantArgs $CommitBranch $CommitRepo)
+    } elseif (($Harness -eq 'copilot') -or ($harnessDescriptor -and $harnessDescriptor.contextArgStyle -eq 'append-system-prompt')) {
+        $contextMessage = (@($contextMessage, (getCommitGrantProse $CommitBranch $CommitRepo)) | Where-Object { $_ }) -join "`n`n"
+    } else {
+        Write-Warning "$Harness can take no commit grant, so this session has none: it renders no grant flags of its own, and has no way of being told in prose."
+    }
 }
 
 # Re-evaluate the current role's repo-skill junctions on every launch, so newly-added (or removed)
@@ -80,14 +124,14 @@ try {
     switch ($Harness) {
         'copilot' {
             $ctxDir = $null
-            if ($Context.contextMessage) {
+            if ($contextMessage) {
                 $ctxDir = Join-Path $env:TEMP "copilot-ctx-$([guid]::NewGuid().ToString('N'))"
                 New-Item -ItemType Directory -Path $ctxDir -Force | Out-Null
-                $Context.contextMessage | Set-Content (Join-Path $ctxDir 'session-context.instructions.md') -Encoding utf8
+                $contextMessage | Set-Content (Join-Path $ctxDir 'session-context.instructions.md') -Encoding utf8
                 $env:COPILOT_CUSTOM_INSTRUCTIONS_DIRS = $ctxDir
             }
             try {
-                & $LaunchHook $resumeSid ($ctxArgs + $ARGS)
+                & $LaunchHook $resumeSid ($ctxArgs + $PassThroughArgs)
             } finally {
                 if ($ctxDir) {
                     Remove-Item Env:\COPILOT_CUSTOM_INSTRUCTIONS_DIRS -ErrorAction SilentlyContinue
@@ -98,13 +142,13 @@ try {
         default {
             if (-not $harnessDescriptor) { throw "Unknown harness: $Harness" }
             $defaultArgs = $ctxArgs
-            if ($harnessDescriptor.contextArgStyle -eq 'append-system-prompt' -and $Context.contextMessage) {
-                $defaultArgs = $defaultArgs + @('--append-system-prompt', $Context.contextMessage)
+            if ($harnessDescriptor.contextArgStyle -eq 'append-system-prompt' -and $contextMessage) {
+                $defaultArgs = $defaultArgs + @('--append-system-prompt', $contextMessage)
             }
             if ($harnessDescriptor.additionalArgs) {
                 $defaultArgs = $defaultArgs + @($harnessDescriptor.additionalArgs)
             }
-            & $LaunchHook $resumeSid ($defaultArgs + $ARGS)
+            & $LaunchHook $resumeSid ($defaultArgs + $grantArgs + $PassThroughArgs)
         }
     }
 } finally {

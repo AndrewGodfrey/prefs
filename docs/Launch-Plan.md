@@ -9,11 +9,13 @@ Plan tracking is split across three ledgers with different owners:
 
 1. **Plan-file frontmatter (YAML)** — plan lifecycle state + next-step pointer. Git-synced with the plan.
    Written only by the state script (`prat/lib/agents/PlanState.ps1`, dot-sourced by pl), which the
-   agent invokes at deliberate boundaries via skills such as `/wrap`, `/wrap-session`, and `/ready-for-user-review`
-   — the model never hand-edits these keys. Three keys:
+   agent invokes at deliberate boundaries via skills such as `/wrap` and `/ready-for-user-review`, and
+   which pl itself invokes for `launches` — the model never hand-edits these keys. Under `current-unit`:
+   - `first`/`last` — the step ids the unit spans (`last` written down only when it differs);
    - `state` — lifecycle word (see table below);
-   - `next-step` — step id + brief label;
-   - `refined` — steps *beyond* the pointer already planned to implementable detail.
+   - `launches` — the launcher's count of sessions spent on this unit;
+
+   and alongside it, `refined` — steps *beyond* the pointer already planned to implementable detail.
 2. **Launcher db (`~/prat/auto/context/db.json`)** — machine-local session association only: which sessions
    belong to which plan, plus a launch cwd and harness. Maintained entirely by the launcher.
 3. **User agreement ledger** — never in the plan file. Step granularity: the move to `_done.md` (via
@@ -22,78 +24,168 @@ Plan tracking is split across three ledgers with different owners:
 
 ## States and Enter dispatch
 
-Four stored states. Session existence is inferred (db `sessionIds` × resumable session files), never stored.
-The "Display label" column is the word shown in the TUI (`displayState`/`Get-PlanStageLabel`, in
+Session existence is inferred (db `sessionIds` × resumable session files), never stored. The "Display
+label" column is the word shown in the TUI (`displayState`/`Get-PlanStageLabel`, in
 `prat/lib/agents/PlanState.ps1`) — a separate, shorter vocabulary from the stored state, meant for humans
 only; agents read/write the stored state.
 
 <!-- prettier-ignore -->
-| Stored state             | Display label | + no resumable session             | + resumable session(s)                      |
-|---------------------------|----------------|-------------------------------------|-----------------------------------------------|
-| `ready-to-plan`           | planning       | fresh planning launch               | picker; defaults to the *fresh* row          |
-| `ready-to-implement`      | coding         | fresh "do the next step" launch     | picker; defaults to the most-recent session  |
-| `ready-for-user-review`   | reviewing      | fresh review launch                 | picker; defaults to the most-recent session  |
-| `checkpointed`            | *(shown as-is, not mapped)* | consumed → fresh implement launch | same — old sessions are reference-only |
+| Stored state                    | Display label | Enters phase   | + no resumable session | + resumable session(s)                     |
+|---------------------------------|---------------|----------------|------------------------|--------------------------------------------|
+| `ready-to-refine`               | refining      | `refine`       | fresh launch           | picker (see Default selection below)       |
+| `ready-for-refined-step-review` | refining      | `review` †     | fresh launch           | picker; always defaults to the session row |
+| `ready-to-implement`            | coding        | `implement`    | fresh launch           | picker                                     |
+| `ready-for-user-review`         | reviewing     | `review`       | fresh launch           | picker; always defaults to the session row |
 
-`checkpointed` is only reachable via `/wrap-session` — the `S` picker no longer offers it (dropped
-2026-07-28; the state and its consume-and-flip machinery are unchanged, only the manual shim is gone).
+† `implement` in `step-review` and `branch-review`: there the agent advances past that checkpoint itself, so
+the state can only mean a session refined the step and stopped before implementing it.
 
-`getLaunchAction` is the pure dispatch function: state + session availability → kind (`fresh`/`resume`) +
-the state's fresh-launch prompt. Missing or unrecognized state is treated as `ready-to-plan`. The
-`checkpointed` consume-and-flip (set by `/wrap-session`) is executed by `openProject` as a plan-file write
-before the fresh session launches — a rare but meaningful launcher write to the plan file; the old sessions
-stay in `sessionIds`, they just stop auto-resuming.
+`getLaunchAction` is the pure dispatch function: plan state + session availability → kind (`fresh`/`resume`)
++ Enters default phase (see Launch keys below). Missing or unrecognized state is treated as
+`ready-to-refine`. A file with no `## Step` headings is a skeleton with no next step to refine, so it
+defaults to `plan` instead.
 
+`PlanState.ps1` maps the retired spellings as it reads them, so an unmigrated plan file still dispatches
+sensibly: `ready-to-plan` is `ready-to-refine`, and `checkpointed` is `ready-to-implement` with a launch
+count of 1.
+
+### Workflow modes
+
+The plan's `workflow` key — `tick-tock`, `step-review` or `branch-review`, absent or unrecognized meaning
+`tick-tock` (prat's `plan-format` skill defines them) — says where a run ends. Besides reading it (through
+the single test `endsRunAtPhaseBoundary`, which picks Enter's phase at `ready-for-refined-step-review`
+above and the wording of the `refine` prompt below), pl can also write it — see `W` below.
+
+### The launch count
+
+The launch count is per-unit and lives on the db entry, not in the plan file: `openProject` bumps
+`launches` once the picker has chosen a row, fresh or resume alike, and it says "a pl launch has worked
+on this unit", which is what the picker's default row reads. It is stored with a `launchesFor` (the `first`
+step it was counted against), and `updateEntryInfo` resets it to 0 whenever the pointer points at a
+different step, so it can't outlive the unit it describes. Keeping it out of the plan file matters: bumping
+it there would write the plan before a branch-review launch, dirtying a granted tree and tripping
+`git_start_branch`'s clean-tree check. Its limit: a `cl` session started outside pl is invisible to it, so
+zero means "no pl launch since the pointer moved", not "no work".
 
 ## Main view
 
-One row per db entry: status marker, plan filename, frontmatter state (`<state>: <next-step>` when a
-pointer is set, else the bare state, else `-`). The marker shows what Enter will do:
+Two lines per db entry, so the plan's name and where it's pointing stop competing for width:
+- Line 1: status marker + plan filename — the identity.
+- Line 2: indented under the name, the frontmatter state (`<state>: <next-step>` when a pointer is
+  set, else the bare state, else `-`) and, for a plan open on another machine, an `⚠ other-machine`
+  flag (see cross-machine visibility below).
+
+The marker on line 1 shows what Enter will do:
 
 - `[live]` — a session for this plan is running now; Enter is blocked (pl can't switch focus to it)
 - `[resume]` — Enter opens the session picker
 - `[fresh]` — Enter starts a fresh session
 
-Plans open on another machine get an `⚠ other-machine` flag (see cross-machine visibility below).
+While idle, the list stays fresh: pl polls each open plan's file mtime on a 100 ms tick (`refreshIfChanged`)
+and re-renders a row only when its plan file was touched — by a session, by hand, or by a run on another
+machine — so a row's `state`/`nextStep` doesn't wait for a key to be re-read.
 
-Keys: `Enter` open, `O` open untracked plan, `R` register orphan session, `S` change state,
-`H` change harness, `V` view plan file, `U` unregister, `Q`/`Esc` quit.
+Keys: `Enter` launch, `P` plan, `D` discuss, `V` view plan file, `C` close, `S` state, `W` workflow,
+`H` harness, `O` open another plan, `R` register session, `Q`/`Esc` quit.
 
-## Enter: the fresh/resume picker
+## Launch keys: Enter, P, D
+
+Three keys launch a session — they share the same picker and machinery (`openProject`), differing
+only in which phase's prompt a fresh launch gets. `Enter` launches into whatever phase
+`getLaunchAction` derives from state (see the table above); `P` always forces `plan`; `D` always
+forces `discuss`.
+
+<!-- prettier-ignore -->
+| Phase       | The session is asked to                                                 |
+|-------------|-------------------------------------------------------------------------|
+| `plan`      | work out what the steps should be                                       |
+| `refine`    | refine the next step (see below)                                        |
+| `implement` | do the next step                                                        |
+| `review`    | read the plan, check the recent context (last session, commits), wait   |
+| `discuss`   | read the plan and wait for questions                                    |
+
+`getLaunchPrompt(phase, planFile, workflow, state)` renders these five. `review`'s prompt names the
+plan's stored state — `ready-for-user-review` or `ready-for-refined-step-review`, the two states
+`Enter` dispatches to `review` from — and asks the agent to get oriented on the recent context
+before waiting for the user; `discuss` (the `D` key) is a way to talk about the plan in a fresh
+session regardless of what phase the state actually names, without disturbing its progress. `P`'s
+prompt is the same one `plan`-phase Enter launches use, offered as its own key since you may want to
+work the steps out even when the state says something else.
+
+In `step-review` and `branch-review` the `refine` prompt asks for the implementation too, since a run
+there doesn't stop at the phase boundary. Each phase's prompt is handed the plan's `workflow`, so a
+later phase can vary with the mode the same way.
+
+The fresh row's label (`getFreshRowPhaseLabel`) names the phase, the next-step pointer (when set) and
+the workflow — e.g. `implement Step 9: The launch UI · branch-review` — so it doubles as the check
+that the plan is in the state you thought before you commit to a launch.
 
 Every launch goes through the same picker (`pickFromList`), even with zero sessions — the
-"(start fresh session)" row is always present, so its inline model field is always reachable. For
-`resume`-kind actions the 3 most recently active sessions are listed above it; older associations stay in
-the db, unshown.
+"(start fresh session)" row is always present, so its inline fields are always reachable. For
+`Enter` and `P`, when sessions are resumable, the 3 most recently active are listed above it; older
+associations stay in the db, unshown. `D` never offers to resume — it's a way to talk, not to
+continue whatever a live session was doing, so its picker always shows the fresh row alone.
 
-Default selection: `ready-to-plan` with sessions defaults to the fresh row (post-wrap planning usually
-wants a fresh session); every other resumable state defaults to the most-recent session row.
+Default selection (`defaultsToFreshPicker`): the most-recent session row until a launch has been counted
+against the current unit (the frontmatter `launches` count — see States below), and the fresh row after
+that, on the grounds that the sessions on offer have already spent themselves on this unit and the plan
+file carries the phase forward. The two review states are the exception and always start on the session
+row: the session under review is the one that refined the step or did the work.
 
 - **Resume**: the picked session's id rides `--resume`/`--resume=` on `cl`'s command line, so any pl
   instance's next command-line scan (see Live-session detection below) sees it live immediately — no
-  hook or pre-write needed. If `cl` exits nonzero, just the failed session id is dropped from the entry —
-  the plan stays tracked.
-- **Fresh**: the entry's cwd is refreshed to the current directory and the state's prompt is passed to `cl`.
+  hook or pre-write needed. A nonzero exit drops that session id from the entry only when the resume was
+  refused, meaning the session log never moved while the child ran (`resumeWasRefused`); a session that
+  ran and then died keeps its place, since it is the one most worth resuming. The plan stays tracked
+  either way.
+- **Fresh**: the entry's cwd is refreshed to the current directory and the phase's prompt is passed
+  to `cl`.
   For claude, pl also generates a session id and passes it via `--session-id`, appending it to the entry's
   `sessionIds` immediately (`getFreshSessionArgs`) — claude's own command line carries nothing else
   identifying, so this is what makes the session detectable at all.
 
-### Model picker (fresh row)
+### Inline fields (fresh row)
 
-If `Get-AgentModelList` is on PATH (an optional, de-supplied command) and covers the entry's harness, the
-fresh row carries an inline model field cycled with ←/→: cost-sorted choices plus a trailing `<default>`
-(no `--model` arg — the harness applies its own default), which is the initial selection. Otherwise
-(non-de users, unlisted harnesses) the field is absent and launches carry no `--model` arg.
+The fresh row carries three inline fields, each cycled by a key and re-derived into the row's label:
+- **Model** — ←/→. Present only when `Get-AgentModelList` is on PATH (an optional, de-supplied command)
+  and covers the entry's harness: cost-sorted choices plus a trailing `<default>` (no `--model` arg —
+  the harness applies its own default), which is the initial selection. Otherwise the field is absent
+  and launches carry no `--model` arg.
+- **Workflow** — `W`. Cycles `tick-tock` → `step-review` → `branch-review` (wraps), and writes
+  immediately through `Set-PlanState`, so the launch reads the new value. Cycling into `branch-review`
+  runs the commit-grant prompt (`setCommitGrant`), the same flow the main list's `W` uses. The
+  main-list `W` screen stays as the repair path for a plan you haven't launched into yet.
+- **Harness** — `H`. Cycles the picker-keyed harnesses (the same set the main list's `H` offers) and
+  writes immediately to the db entry, so the launch uses the new harness.
 
 ### Session rows
 
-A session is resumable when its `<sid>.jsonl` exists under any `~/.claude/projects/*` dir — searching all
-project dirs avoids reimplementing CC's cwd→dirname rule, and the files are sync-backed, so cross-machine
-sessions count. Recency is jsonl LastWriteTime, most recent first. Row title comes from CC's
-`sessions-index.json`: `summary`, else `firstPrompt` (truncated with ellipsis to 60 chars), else the
-session id.
+A session is resumable when its `<sid>.jsonl` exists under any `~/.claude/projects/*` dir (the
+claude-projects path) or under the harness's own flat `sessionsDir` — searching all project dirs avoids
+reimplementing CC's cwd→dirname rule, and the files are sync-backed, so cross-machine sessions count.
+Recency is jsonl LastWriteTime, most recent first.
 
-## O / R / S / U
+Each row (`buildLaunchRowLabel`) is the session's short id (first 8 chars of the sid, `getShortId`),
+its time, and its text:
+
+```
+<shortid>  <start> → <last>  <text>
+```
+
+`<last>` is the jsonl mtime (LastWriteTime). `<start>` is the first logged event's `ts` — recorded only
+for the flat path (the harness's own flat session logs); a claude-projects row shows `<last>` alone.
+
+The text is the session's closing statement — its last `assistant_text` (`getFlatSessionAccomplishment`),
+newlines collapsed so the row stays one line — when the harness records one; otherwise its summary.
+Closing statements come only from the flat path, so a claude-projects row always shows its summary. The
+per-path summary:
+
+- **claude-projects**: from CC's `sessions-index.json` — `summary`, else `firstPrompt` (truncated to
+  60 chars), else the sid.
+- **flat** (a harness's `sessionsDir`): the first logged `user_message` (truncated to 60 chars), else
+  the sid.
+
+## O / R / S / W / H / V / C
 
 - **O — open untracked plan**: lists `*.md` under the plans dir, excluding `done/` paths,
   `_done`/`_ref`/`_background` suffixes, and already-tracked plans. Picking one creates a db entry
@@ -105,16 +197,22 @@ session id.
 - **S — change state**: chiefly a repair tool for when something has gone wrong — normal state changes
   happen via the agent's state script during sessions. It doubles as the sanctioned lightweight advance
   gesture (`S` → `C`) for skipping straight to `ready-to-implement` after a refine that needs no plan
-  review; that path bypasses `/wrap`'s planning-close reflect, so use it sparingly. Menu: `[P] planning
+  review; that path bypasses `/wrap`'s planning-close reflect, so use it sparingly. Menu: `[P] refining
   [C] coding [R] reviewing`. Writes through `Set-PlanState`. Blocked while a session is live.
-- **V — view plan**: opens the selected plan file via `Open-FileInEditor` (the `e` alias's target;
-  prat-deployed, so available in the interactive profile pl runs under). No-op if that alias isn't
-  installed.
+- **W — change workflow** (`changeWorkflow`): menu `[T] tick-tock [S] step-review [B] branch-review`,
+  writes through `Set-PlanState -Workflow`. Picking `branch-review` also prompts for the commit grant
+  (`setCommitGrant`) — branch first, defaulting to what the entry's `cwd` has checked out
+  (`getRepoBranch`), shown and only ever written once confirmed (Enter) or overridden by typing; then a
+  comma-separated repo list, with no inferred default. No branch typed and none inferred writes no grant.
+  `T`/`S` leave an existing grant untouched. Blocked while a session is live.
 - **H — change harness**: picks `claude`, plus any custom harness registered via `Get-AgentHarnesses`
   that carries a `pickerKey` (`changeHarness`/`getHarnessPickerOptions`). Unlike state, harness is a
   db-only field (`saveDb`, not a plan-file write). `copilot` isn't offered here — still fully
   supported, just not reachable from this picker. Blocked while a session is live.
-- **U — unregister**: removes the db entry. Blocked while live.
+- **V — view plan**: opens the selected plan file via `Open-FileInEditor` (the `e` alias's target;
+  prat-deployed, so available in the interactive profile pl runs under). No-op if that alias isn't
+  installed.
+- **C — close**: removes the db entry (pairs with `O`, which adds one). Blocked while live.
 
 ## db.json
 
@@ -134,11 +232,87 @@ Consumers:
 - the statusline — shows the active plan;
 - skills' "the active plan" default.
 
+## The commit grant
+
+A plan's `commit-grant: { branch, repos }` frontmatter says the agent may commit, in those repos, on that
+branch — declared by hand, or written via `W`'s `setCommitGrant` (see above). Every launch through
+`launchCl` carries it, resume and fresh alike, as `-CommitBranch` / `-CommitRepo` on `cl`'s command line.
+
+`resolveCommitGrant` turns each `repos` entry into a path — a prat repo id, or a path of its own when it
+contains a separator or a leading `~` — and checks the branch is checked out there. One entry that doesn't
+resolve, or one repo on another branch, refuses the whole grant, and the session starts with no commit
+rights.
+
+A repo still on `main` that has no branch of that name yet is the exception: the grant holds, and pl prints
+what it is about to let happen and pauses for a keypress, rather than refusing. A session whose harness has a
+branch-creating tool makes the branch there; one told about the grant in prose can't, and can't commit in
+that repo until the branch exists.
+
+## Branch-review run
+
+On `branch-review`, a fresh `Enter` dispatch into `refine`/`implement` — never `P`/`D`, and never
+picking a session row — hands off to `runBranchReviewRun` instead of a single `launchCl`, but only
+when the current step is in the plan's `automatable` set and the entry's harness declares itself
+headless-capable (`headlessFlag` on its descriptor, checked via `harnessSupportsHeadless` /
+`isBranchReviewLoopable`); a step outside the set, or a harness with no flag, gets today's single
+launch. The `automatable` field is hand-written beside `workflow` and `commit-grant`: `*` for every
+step, or a comma list of numbers and inclusive ranges (`16-19`, `16, 19`); an absent field means no
+step is automatable, so such a plan never hands off. A de-supplied harness declares its flag via
+`headlessFlag` on its `Get-AgentHarnesses.ps1` entry, beside `commitGrantArgs`.
+
+The run is a loop: one fresh, headless launch per step (`getFreshSessionArgs` + `--headless`), each
+resolving its own phase/prompt from a fresh `Get-PlanState` read the way Enter's own dispatch does,
+until `getPreflightStopReason` (checked before spending a launch) or `getPostflightStopReason`
+(checked after one returns) names a reason:
+
+- the plan is finished: its file is gone, or it has no steps left — `/wrap` on the last step cut its
+  body, so the plan lands at `ready-for-user-review` (phase `review`) with nothing to point at, and
+  the run reads that as completion rather than a stall;
+- the state is `ready-for-user-review` and steps remain (`getLaunchAction`'s phase is `review`) —
+  the user's checkpoint, which an unattended run can't cross on its own;
+- the current step is outside the plan's `automatable` set (an absent field counts as empty) — a
+  design step the run stops in front of rather than inventing on its own; the reason names the step;
+- 50 launches or 12 hours elapsed (a backstop against a run that keeps moving without getting
+  anywhere, not a limit a normal run should meet);
+- the launch exited non-zero;
+- the launch itself outlived its per-launch cap (3 hours, sized for a slow local model): the run
+  killed the session's process tree and stops, naming the timed-out session id in the reason so its
+  log is findable in the report. The 50-launch and 12-hour budgets bound the gaps *between*
+  launches, never a single launch, which is what this caps (`waitLaunchProcess` + `launchCl`'s
+  `-Unattended` gate);
+- the frontmatter didn't change (`planFrontmatterProgressed`, everything but `launches` — which the
+  launcher, not the agent, increments every launch): a step that wrapped moves the pointer or state,
+  a stalled one doesn't.
+
+A commit grant that doesn't qualify (`commitGrantRefusedReason`) stops the run before it spends a
+launch, rather than launching without commit rights — the whole point of `branch-review` is the
+commit series. Every console pause on the launch path — the cursor guard, both commit-grant pauses —
+is suppressed for these launches (`launchCl -Unattended`), since nobody is there to answer one.
+
+The outcome (`newRunReport`: plan, the steps it closed, stop reason, last session id) is written to
+`~/prat/auto/context/plan-run-report.json` and rendered above the list (`getRunReportLines`,
+`buildLauncherContext` → `renderList`) — pl's list otherwise looks unchanged after a run that quietly
+finished several steps. The steps-closed list is derived from the plan's end state: 
+`getStepsClosedByRun` diffs the plan's `StepHeadings` before and after the run.
+One slot, replacing whatever was there; dismissed by the next launch of *any* plan (cleared alongside
+the db-entry launch-count bump, once a row is picked), not by navigating the list or quitting pl.
+`sendRunNotification` fires once for the whole run in its place —
+a headless launch's own per-turn hook (`prigApp.run`) passes no `notify_turn_completed`, so a run
+doesn't also fire one identical "done" notification per step.
+
 ## Post-exit loop
 
 After `cl` exits, pl rebuilds its context and re-enters the TUI with the exited plan re-selected. `Q`/`Esc`
 are the only real exits. Combined with accumulating `sessionIds`, this gives the instruction-reload cycle:
-quit CC → land in pl → Enter resumes.
+quit CC → land in pl → Enter → pick the session row (↑ from the fresh row, which the launch just counted
+against the unit — see Default selection above).
+
+A failure has to survive that re-entry to be readable, which is what `buildChildCommand`'s trailing
+`exit $LASTEXITCODE` is for: pwsh adopts that variable as its own exit code only when the
+`-EncodedCommand` script ends on a native command, and `cl` ends on PowerShell, so a harness that printed
+an error and exited non-zero otherwise reaches pl as a clean 0 — no message, and the next redraw clears
+what the harness printed. With the code propagated, pl prints the exit code and waits for Enter, leaving
+the harness's own output on screen above it.
 
 ## Live-session detection
 

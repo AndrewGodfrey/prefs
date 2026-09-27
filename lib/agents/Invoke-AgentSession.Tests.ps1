@@ -253,6 +253,122 @@ Describe "Invoke-AgentSession" {
         }
     }
 
+    Context "commit grant — a descriptor that renders its own flags" {
+        BeforeEach {
+            $roleDir  = (New-Item "TestDrive:/role-grant-flags" -ItemType Directory -Force).FullName
+            $ctx      = New-MockCtx -RoleDir $roleDir -ContextMessage 'work on C:/repos/myrepo'
+            $captured = @{}
+            $hook = { param($resumeSid, $allArgs) $captured.allArgs = $allArgs }
+            # A renderer wins over the prose even for a harness that could carry prose, so a harness
+            # that writes its own grant section is never told twice.
+            function Get-AgentHarnesses {
+                @(@{ name = 'flagtool'; contextArgStyle = 'append-system-prompt'
+                     commitGrantArgs = { param([string] $branch, [string[]] $repoPaths)
+                                         @($repoPaths | ForEach-Object { '--grant-repo'; $_ }) + @('--grant-branch', $branch) } })
+            }
+        }
+
+        It "passes the rendered flags to the hook" {
+            & $script -Harness 'flagtool' -LaunchHook $hook -Context $ctx -CommitBranch 'feature' -CommitRepo @('C:/repos/myrepo', 'C:/repos/myotherrepo')
+
+            $captured.allArgs | Should -Contain '--grant-repo'
+            $captured.allArgs | Should -Contain 'C:/repos/myotherrepo'
+            $idx = [array]::IndexOf([object[]]$captured.allArgs, '--grant-branch')
+            $captured.allArgs[$idx + 1] | Should -Be 'feature'
+        }
+
+        It "adds no grant prose to the context message" {
+            & $script -Harness 'flagtool' -LaunchHook $hook -Context $ctx -CommitBranch 'feature' -CommitRepo @('C:/repos/myrepo')
+
+            $idx = [array]::IndexOf([object[]]$captured.allArgs, '--append-system-prompt')
+            $captured.allArgs[$idx + 1] | Should -Be 'work on C:/repos/myrepo'
+        }
+    }
+
+    Context "commit grant — a harness told in prose" {
+        BeforeEach {
+            $roleDir  = (New-Item "TestDrive:/role-grant-prose" -ItemType Directory -Force).FullName
+            $ctx      = New-MockCtx -RoleDir $roleDir -ContextMessage 'work on C:/repos/myrepo'
+            $captured = @{}
+            $hook = { param($resumeSid, $allArgs) $captured.allArgs = $allArgs }
+        }
+
+        It "appends the grant to the appended system prompt, keeping the context message" {
+            & $script -Harness 'claude' -LaunchHook $hook -Context $ctx -CommitBranch 'feature' -CommitRepo @('C:/repos/myrepo', 'C:/repos/myotherrepo')
+
+            $idx = [array]::IndexOf([object[]]$captured.allArgs, '--append-system-prompt')
+            $appended = $captured.allArgs[$idx + 1]
+            $appended | Should -BeLike '*work on C:/repos/myrepo*'
+            $appended | Should -BeLike '*feature*'
+            $appended | Should -BeLike '*C:/repos/myotherrepo*'
+            $appended | Should -BeLike '*one commit per step*'
+            $appended | Should -BeLike '*wrap*'
+        }
+
+        It "says nothing about committing when no grant was passed" {
+            & $script -Harness 'claude' -LaunchHook $hook -Context $ctx
+
+            $idx = [array]::IndexOf([object[]]$captured.allArgs, '--append-system-prompt')
+            $captured.allArgs[$idx + 1] | Should -Be 'work on C:/repos/myrepo'
+        }
+
+        It "reaches copilot through its instructions file" {
+            $hook = { param($resumeSid, $allArgs)
+                      $captured.instructions = Get-Content (Join-Path $env:COPILOT_CUSTOM_INSTRUCTIONS_DIRS 'session-context.instructions.md') -Raw }
+
+            & $script -Harness 'copilot' -LaunchHook $hook -Context $ctx -CommitBranch 'feature' -CommitRepo @('C:/repos/myrepo')
+
+            $captured.instructions | Should -BeLike '*work on C:/repos/myrepo*'
+            $captured.instructions | Should -BeLike '*one commit per step*'
+        }
+
+        It "carries the grant with no context message of its own to carry it in" {
+            $bareCtx = New-MockCtx -RoleDir $roleDir
+
+            & $script -Harness 'claude' -LaunchHook $hook -Context $bareCtx -CommitBranch 'feature' -CommitRepo @('C:/repos/myrepo')
+
+            $idx = [array]::IndexOf([object[]]$captured.allArgs, '--append-system-prompt')
+            $captured.allArgs[$idx + 1] | Should -BeLike '*one commit per step*'
+        }
+    }
+
+    Context "commit grant — a harness that can express neither" {
+        BeforeEach {
+            $roleDir  = (New-Item "TestDrive:/role-grant-neither" -ItemType Directory -Force).FullName
+            $ctx      = New-MockCtx -RoleDir $roleDir
+            $captured = @{}
+            $hook = { param($resumeSid, $allArgs) $captured.allArgs = $allArgs }
+            function Get-AgentHarnesses { @(@{ name = 'customtool' }) }
+        }
+
+        It "warns, and launches with no grant flags" {
+            Mock Write-Warning { }
+
+            & $script -Harness 'customtool' -LaunchHook $hook -Context $ctx -CommitBranch 'feature' -CommitRepo @('C:/repos/myrepo') 'someArg'
+
+            Should -Invoke Write-Warning -Times 1 -Exactly -ParameterFilter { $Message -like '*commit*' }
+            @($captured.allArgs) | Should -Be @('someArg')
+        }
+    }
+
+    Context "commit grant — half a grant" {
+        BeforeEach {
+            $roleDir = (New-Item "TestDrive:/role-grant-half" -ItemType Directory -Force).FullName
+            $ctx     = New-MockCtx -RoleDir $roleDir
+            $hook    = { param($resumeSid, $allArgs) }
+        }
+
+        It "throws when the branch arrives without repos" {
+            { & $script -Harness 'claude' -LaunchHook $hook -Context $ctx -CommitBranch 'feature' } |
+                Should -Throw '*commit grant*'
+        }
+
+        It "throws when repos arrive without a branch" {
+            { & $script -Harness 'claude' -LaunchHook $hook -Context $ctx -CommitRepo @('C:/repos/myrepo') } |
+                Should -Throw '*commit grant*'
+        }
+    }
+
     Context "repoSkills present — syncs junctions" {
         BeforeAll {
             $roleDir = (New-Item "TestDrive:/role-reposkills" -ItemType Directory).FullName

@@ -237,6 +237,12 @@ Describe "claude-statusline" {
             $out | Should -Not -Match 'myplan-upgrade\.md'
         }
 
+        It "shows 'refining:' when the plan's state is ready-to-refine" {
+            $env:CL_PLAN_FILE = writePlanFile 'refine-plan.md' "---`r`ncurrent-step:`r`n  state: ready-to-refine`r`n---`r`n"
+            $out = Get-StatusLineString @{ cwd = $env:TEMP } $script:now -NoCwd
+            $out | Should -Match 'refining:refine-plan'
+        }
+
         It "shows 'coding:' when the plan's state is ready-to-implement" {
             $env:CL_PLAN_FILE = writePlanFile 'coding-plan.md' "---`r`ncurrent-step:`r`n  state: ready-to-implement`r`n---`r`n"
             $out = Get-StatusLineString @{ cwd = $env:TEMP } $script:now -NoCwd
@@ -252,7 +258,7 @@ Describe "claude-statusline" {
         It "shows no plan segment when CL_PLAN_FILE is unset" {
             Remove-Item Env:\CL_PLAN_FILE -ErrorAction SilentlyContinue
             $out = Get-StatusLineString @{ cwd = $env:TEMP } $script:now -NoCwd
-            $out | Should -Not -Match 'planning:|coding:|reviewing:'
+            $out | Should -Not -Match 'planning:|refining:|coding:|reviewing:'
         }
     }
 

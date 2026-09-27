@@ -7,7 +7,9 @@ Closes a fully completed plan. The plan file is deleted; only the `*_done.md` fi
 
 ## Steps
 
-1. **Run `/wrap`** for the final step.
+1. **Run `/wrap`** for the final step. The advance lands the plan at `ready-for-user-review` with
+   the pointer on the now-closed step — a finished plan, nothing left to point at. That is expected,
+   not an error; the whole branch is what the user reviews.
 
 2. **Check the plan file for durable content.** Skim the plan file for information that would be useful
    to save, e.g. in a code comment, design doc, or agent instruction. If so, draft a change to
