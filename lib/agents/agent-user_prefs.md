@@ -83,6 +83,10 @@ Second exception: a session can be launched holding a commit grant for a branch 
 which case its own instructions say so, naming a commit tool where the harness has one. There, the index is
 yours for those repos and you commit without asking. Everything above still holds for every other repo.
 
+When synchronizing a feature branch with its target, never include the merge or rebase in the same
+push as branch changes. Push the branch changes first, then synchronize and push separately so
+that diff tools that pay more attention to pushes than commits, treat them as distinct iterations.
+
 If a file you're working on shows unexpected content mid-session (syntax error, unfamiliar
 additions), the usual reason is agent mistakes in using tools. But it sometimes can be simply
 that I made concurrent edits.
@@ -123,6 +127,11 @@ I knowingly make this choice even though it's contrary to typical industry pract
 
 This also applies to non-regression messes that we notice while coding. Depending on the size, we might
 note them in a plan instead of pivoting to fix them immediately.
+
+### Naming before redesign
+
+In large stateful procedures, normalize names for equivalent concepts before redesigning the logic.
+The names are part of the model used to reason about correctness.
 
 ### Working-coordination plan docs are throwaway
 
