@@ -31,6 +31,7 @@ function Get-ExternalGitConfigSections([string] $content, [string[]] $ownedHeade
 
 if ($MyInvocation.InvocationName -ne ".") {
     $stage = $installationTracker.StartStage('gitconfig')
+    Install-InteractiveAlias $stage 'gwd' 'Launch-GitWinmergeDiff'
 
     $userEmail     = $Config['userEmail']
     $userName      = $Config['userName']
@@ -64,6 +65,10 @@ if ($MyInvocation.InvocationName -ne ".") {
     $safeDirs = (@("$home/prefs", "$home/prat") + $extraSafeDirs) | ForEach-Object { $_ -replace '\\', '/' }
     $text += "[safe]`n"
     $text += ($safeDirs | ForEach-Object { "    directory = $_`n" }) -join ""
+    # WinMerge's per-user install dir (set up by the winmerge package, instWingetPackages.ps1) is
+    # not on PATH, so give git the absolute path explicitly.
+    $winMergePath = "$env:LOCALAPPDATA/Programs/WinMerge/WinMergeU.exe" -replace '\\', '/'
+    $text += "[difftool `"winmerge`"]`n    path = $winMergePath`n"
 
     $extraGitConfig = $Config['extraGitConfig']
     if ($extraGitConfig) {
