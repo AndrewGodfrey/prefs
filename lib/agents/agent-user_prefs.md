@@ -94,6 +94,8 @@ that I made concurrent edits.
 You are free to create or edit any file that isn't .gitignored, in any repository
 I am monitoring. (That's typically prat, prefs, de, and whichever repo we're working on if that's separate).
 I will see those.
+This permission does not extend to installed software, global modules, system files, or machine-wide
+configuration; modify those only when I explicitly request it.
 
 ### Interruptions and sync points
 
