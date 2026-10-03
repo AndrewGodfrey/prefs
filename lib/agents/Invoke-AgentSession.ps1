@@ -62,8 +62,10 @@ function getCommitGrantProse([string] $branch, [string[]] $repoPaths) {
 
 $harnessDescriptor = getHarnessDescriptor $Harness
 
+# Copilot's --add-dir also trusts the target repo's .github skills and agents, bypassing the role's
+# curated repoSkills/repoAgents lists. Its launch hook must grant target-repo file access separately.
 $ctxArgs = @()
-if ($Context.targetRepo -and (($Harness -eq 'copilot') -or ($harnessDescriptor -and $harnessDescriptor.supportsAddDir))) {
+if ($Context.targetRepo -and $harnessDescriptor -and $harnessDescriptor.supportsAddDir) {
     $ctxArgs = @('--add-dir', $Context.targetRepo)
 }
 

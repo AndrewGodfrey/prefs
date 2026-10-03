@@ -168,10 +168,16 @@ Describe "Invoke-AgentSession" {
             $hook = { param($resumeSid, $allArgs) $captured.allArgs = $allArgs }
         }
 
-        It "passes --add-dir but not --append-system-prompt" {
+        It "uses instructions for the target repo without trusting its skills via --add-dir" {
+            $hook = { param($resumeSid, $allArgs)
+                      $captured.allArgs = $allArgs
+                      $captured.instructions = Get-Content (Join-Path $env:COPILOT_CUSTOM_INSTRUCTIONS_DIRS 'session-context.instructions.md') -Raw }
+
             & $script -Harness 'copilot' -LaunchHook $hook -Context $ctx
-            $captured.allArgs | Should -Contain '--add-dir'
+
+            $captured.allArgs | Should -Not -Contain '--add-dir'
             $captured.allArgs | Should -Not -Contain '--append-system-prompt'
+            $captured.instructions | Should -BeLike '*C:/repos/myrepo*'
         }
     }
 
