@@ -17,12 +17,7 @@ if ($MyInvocation.InvocationName -ne ".") {
     }
 
     if ("pkg/python" -notin $Suppress) {
-        # UTF-8 mode: on Windows, Python otherwise encodes a piped stdout, and open() without encoding=, with the
-        # legacy ANSI code page, raising UnicodeEncodeError on characters like em dashes. Linux/macOS already default
-        # to UTF-8 via the locale. Moot from Python 3.15, where UTF-8 mode becomes the default (PEP 686).
-        $stage = $installationTracker.StartStage('python-utf8')
-        Install-UserEnvironmentVariable $stage 'PYTHONUTF8' '1'
-        $installationTracker.EndStage($stage)
+        & $PSScriptRoot\pythonUtf8_prefs.ps1 $installationTracker
     }
 
     if ("pkg/winmerge" -notin $Suppress) {
