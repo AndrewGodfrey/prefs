@@ -3,6 +3,7 @@
     skillGroups = @{
         writing       = @('kql-techniques', 'drafting-for-others')
         planLifecycle = @('end-plan')
+        repoCuration  = @('review-repo-skills')
     }
 }
 # OmitFromCoverageReport: a unit test would just restate it - static skill-group data
