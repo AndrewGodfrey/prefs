@@ -80,9 +80,4 @@ Here's a best-effort list of extensions and settings I set up ... which are now 
   - ranyitz.search-presets - Ctrl-Alt-F to use.
 #>
 
-# Migration: 'rg' used to alias VS Code's bundled ripgrep copy; it's now a standalone package (see
-# instPackages.ps1's `ripgrep` entry), so the alias just shadows PATH and must go, not be repointed.
-$stage.NoteMigrationStep((Get-Date "2026-07-30"))
-Remove-InteractiveAlias $stage 'rg'
-
 $installationTracker.EndStage($stage)
