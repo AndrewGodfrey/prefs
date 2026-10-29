@@ -5,6 +5,13 @@ description: Use when writing KQL queries, especially for timecharts and dashboa
 
 # KQL Techniques
 
+## `dcount` is approximate
+
+`dcount()` is a HyperLogLog estimate and can be off by a few even on small sets. When an exact count matters
+(e.g. "did every job run?"), use `count_distinct()` (valid up to 100 million distinct values).
+
+Another case to watch out for is `percentile()`.
+
 ## Gap-free timecharts with `make-series` + `mv-expand`
 
 Raw `summarize ... by bin()` produces gaps where no data exists. For timecharts, use `make-series`
