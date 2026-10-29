@@ -184,6 +184,9 @@ Examples:
 
 ### Investigation mode
 
+An incidental snag during setup doesn't make root-cause investigation the task. Keep diagnosis proportional to
+the user's goal, especially when the user must manually run commands and relay results.
+
 When investigating (asking "what's going on", looking at logs, tracing a bug), default to deepening
 the investigation rather than proposing downstream actions — file a bug, write a fix, hand off,
 "pivot" to the next test. Treat findings synthesized from a handful of log lines as hypotheses
