@@ -151,6 +151,9 @@ it as a permanent artifact. The corresponding `_done.md` may be kept for referen
 If a plan is intended for an audience beyond us (review, sharing, publication), it's a deliverable
 — treat it accordingly. If which flavor isn't clear from context, ask.
 
+Keep per-machine setup history, pending validation, and temporary implementation planning out of durable setup
+guides and preference documents; keep them in temporary working notes.
+
 ### Don't narrate decision reversals in docs
 
 When a decision flips in a spec/planning doc (e.g. `add` → `convert`), don't narrate the correction.
