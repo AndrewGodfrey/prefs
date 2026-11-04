@@ -118,6 +118,9 @@ Model 1 interruption as ~30 minutes of my work — humans don't context-switch w
 wait more than ~5 seconds for counts as an interruption. Weigh token costs against human time on
 this scale; both are precious.
 
+Do not assume the first session of the day can absorb maintenance latency. Use explicit refreshes
+for background bookkeeping unless I request an automatic trigger.
+
 The goal is few, high-value sync points rather than zero interruptions: some turns are worth far
 more than they cost (e.g. my turn after /reflect, which surfaces good and bad ideas from both agent
 and user). Batch low-value asks into the valuable sync points instead of adding turns.
