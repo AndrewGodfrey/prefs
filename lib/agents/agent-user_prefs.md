@@ -95,6 +95,9 @@ without asking for permission again.
 
 To view changes, run `git diff` (unstaged) and `git diff --cached` (staged) separately.
 
+Keep behavior-preserving refactoring and behavior changes in separate commits, with the refactoring
+first and the behavior change second.
+
 When synchronizing a feature branch with its target, never include the merge or rebase in the same
 push as branch changes. Push the branch changes first, then synchronize and push separately so
 that diff tools that pay more attention to pushes than commits, treat them as distinct iterations.
