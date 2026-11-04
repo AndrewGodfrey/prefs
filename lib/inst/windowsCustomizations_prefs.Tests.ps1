@@ -3,6 +3,31 @@ BeforeAll {
     . "$PSScriptRoot/windowsCustomizations_prefs.ps1"
 }
 
+Describe "Windows customization prerequisites" {
+    BeforeAll {
+        Import-Module "$HOME/prat/lib/Installers/Installers.psd1" -Force
+        $script:terminalOrder = [System.Collections.Generic.List[string]]::new()
+        Mock Install-PratPackage { $script:terminalOrder.Add($packageId) }
+        Mock installShellCustomization {}
+        Mock installWindowsTerminalCustomization { $script:terminalOrder.Add('customize') }
+    }
+
+    It "ensures Terminal is installed before configuring it" {
+        $stage = [pscustomobject]@{}
+        $stage | Add-Member ScriptMethod EnsureManualStep { param($id, $instructions) }
+        $tracker = [pscustomobject]@{ Stage = $stage }
+        $tracker | Add-Member ScriptMethod StartStage { param($name) $this.Stage }
+        $tracker | Add-Member ScriptMethod EndStage { param($stage) }
+
+        main $tracker
+
+        $script:terminalOrder.ToArray() | Should -Be @('windowsTerminal', 'customize')
+        Should -Invoke Install-PratPackage -Exactly -Times 1 -ParameterFilter {
+            $installationTracker -eq $tracker
+        }
+    }
+}
+
 Describe "customizeTerminal" {
     BeforeAll {
         $script:filename = "test.json"

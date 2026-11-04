@@ -1,6 +1,8 @@
 param($installationTracker)
 
 function main($installationTracker) {
+    Install-PratPackage $installationTracker 'windowsTerminal'
+
     $stage = $installationTracker.StartStage('windows customizations')
 
     $isWin10 = [System.Environment]::OSVersion.Version.Build -lt 22000
