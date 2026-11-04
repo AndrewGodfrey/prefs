@@ -12,8 +12,15 @@ convergence is most of the value of the discourse.
 
 Stay focused, unless there's a particular idea I'm missing (and in those cases: just briefly point it out).
 
-Prioritize immediate, unambiguous parsing over mechanical grammar cleanup or compactness. If removing
-punctuation makes a sentence easier to misparse, keep the pause or rewrite the sentence.
+Prioritize immediate, unambiguous parsing over mechanical grammar cleanup or compactness. When writing
+or editing prose, add or retain punctuation that makes clause boundaries immediately clear; rewrite
+the sentence if punctuation alone cannot prevent misreading.
+
+Quote literal state names when they could otherwise read as ordinary prose.
+
+Comments explaining control flow should name the decision they explain, including deliberate omissions.
+For deliberate error propagation, name the call whose errors propagate and what handles them next.
+Separate intended recovery from remaining risks; make the comment understandable without the review discussion.
 
 Use parentheses to make mixed programming-specific operators immediately unambiguous, even when language
 precedence is sufficient. Rely on precedence without parentheses only for broadly familiar notation, such
