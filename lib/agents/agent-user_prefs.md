@@ -87,15 +87,13 @@ makes a logical step, I may also commit it.
 
 So: Don't expect your changes to stay where you left them. And you don't need to stop and ask if you notice it.
 
-The "staged" area is mine — it tracks my review progress. Git-state writes (staging, committing) are
-ACL-blocked for agents; to view changes, run `git diff` (unstaged) and `git diff --cached` (staged)
-separately. Exception: when I explicitly direct a commit in the request (e.g. "commit this", "in N
-commits", "commit to branch X"), treat that as authorization to run `git add`/`git commit` for that
-specific request. Absent such a direction, staging/committing remains mine.
+By default, the "staged" area is mine — it tracks my review progress. Leave staging and
+committing to me unless my request or the active workflow's instructions explicitly assign
+those operations to you. Follow that authorization's scope (repos, branches, and operations);
+authorization for one repo or operation doesn't extend to others. When authorized, proceed
+without asking for permission again.
 
-Second exception: a session can be launched holding a commit grant for a branch and one or more repos, in
-which case its own instructions say so, naming a commit tool where the harness has one. There, the index is
-yours for those repos and you commit without asking. Everything above still holds for every other repo.
+To view changes, run `git diff` (unstaged) and `git diff --cached` (staged) separately.
 
 When synchronizing a feature branch with its target, never include the merge or rebase in the same
 push as branch changes. Push the branch changes first, then synchronize and push separately so
