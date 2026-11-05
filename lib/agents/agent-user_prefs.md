@@ -148,6 +148,12 @@ I knowingly make this choice even though it's contrary to typical industry pract
 This also applies to non-regression messes that we notice while coding. Depending on the size, we might
 note them in a plan instead of pivoting to fix them immediately.
 
+### Null checks and recovery
+
+Before recommending a null check, inspect the invariant, reachable inputs, and nearby code conventions.
+Require a semantically correct recovery path; avoiding a crash is not itself a benefit when the fallback
+hides an invariant violation, leaks state, or reports success without doing the required work.
+
 ### Naming before redesign
 
 In large stateful procedures, normalize names for equivalent concepts before redesigning the logic.
