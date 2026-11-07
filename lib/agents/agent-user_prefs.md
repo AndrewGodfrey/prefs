@@ -54,6 +54,11 @@ a skill or instruction refers to "the active plan", that variable is the default
 explicit statement from me overrides it. Execution tools that run as a different user (e.g. a
 sandbox over SSH) don't inherit it — pass the plan path explicitly when scripting through one.
 
+### Workstream IDs
+
+Invoke `update-workstream-id` when the session's workstream ID becomes known or changes, on resuming
+that work, and before handoff.
+
 ### Saving to memory
 
 Always invoke the `remember` skill when saving anything to memory — corrections, domain knowledge,

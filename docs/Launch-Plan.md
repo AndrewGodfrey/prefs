@@ -139,10 +139,7 @@ row: the session under review is the one that refined the step or did the work.
   ran and then died keeps its place, since it is the one most worth resuming. The plan stays tracked
   either way.
 - **Fresh**: the entry's cwd is refreshed to the current directory and the phase's prompt is passed
-  to `cl`.
-  For claude, pl also generates a session id and passes it via `--session-id`, appending it to the entry's
-  `sessionIds` immediately (`getFreshSessionArgs`) — claude's own command line carries nothing else
-  identifying, so this is what makes the session detectable at all.
+  to `cl`, with a session id when the harness's launcher doesn't supply one (`getFreshSessionArgs`).
 
 ### Inline fields (fresh row)
 
@@ -160,10 +157,8 @@ The fresh row carries three inline fields, each cycled by a key and re-derived i
 
 ### Session rows
 
-A session is resumable when its `<sid>.jsonl` exists under any `~/.claude/projects/*` dir (the
-claude-projects path) or under the harness's own flat `sessionsDir` — searching all project dirs avoids
-reimplementing CC's cwd→dirname rule, and the files are sync-backed, so cross-machine sessions count.
-Recency is jsonl LastWriteTime, most recent first.
+A session is resumable when its log is in its harness's session log store (see Configuration).
+Recency is the log's LastWriteTime, most recent first.
 
 Each row (`buildLaunchRowLabel`) is the session's short id (first 8 chars of the sid, `getShortId`),
 its time, and its text:
@@ -172,18 +167,12 @@ its time, and its text:
 <shortid>  <start> → <last>  <text>
 ```
 
-`<last>` is the jsonl mtime (LastWriteTime). `<start>` is the first logged event's `ts` — recorded only
-for the flat path (the harness's own flat session logs); a claude-projects row shows `<last>` alone.
+`<last>` is the log's LastWriteTime. `<start>` is the first logged event's `ts`, where the store's log
+format has one; otherwise the row shows `<last>` alone.
 
-The text is the session's closing statement — its last `assistant_text` (`getFlatSessionAccomplishment`),
-newlines collapsed so the row stays one line — when the harness records one; otherwise its summary.
-Closing statements come only from the flat path, so a claude-projects row always shows its summary. The
-per-path summary:
-
-- **claude-projects**: from CC's `sessions-index.json` — `summary`, else `firstPrompt` (truncated to
-  60 chars), else the sid.
-- **flat** (a harness's `sessionsDir`): the first logged `user_message` (truncated to 60 chars), else
-  the sid.
+The text is the session's closing statement (its last `assistant_text`, `getFlatSessionAccomplishment`),
+newlines collapsed so the row stays one line, when the store records one; otherwise its summary: the
+store's own index summary where it keeps one, else the first prompt (truncated to 60 chars), else the sid.
 
 ## O / R / S / W / H / V / C
 
@@ -205,10 +194,10 @@ per-path summary:
   (`getRepoBranch`), shown and only ever written once confirmed (Enter) or overridden by typing; then a
   comma-separated repo list, with no inferred default. No branch typed and none inferred writes no grant.
   `T`/`S` leave an existing grant untouched. Blocked while a session is live.
-- **H — change harness**: picks `claude`, plus any custom harness registered via `Get-AgentHarnesses`
-  that carries a `pickerKey` (`changeHarness`/`getHarnessPickerOptions`). Unlike state, harness is a
-  db-only field (`saveDb`, not a plan-file write). `copilot` isn't offered here — still fully
-  supported, just not reachable from this picker. Blocked while a session is live.
+- **H — change harness**: picks among the selected harnesses (harness registry, see Configuration) that
+  carry a `pickerKey` (`changeHarness`/`getHarnessPickerOptions`). Unlike state, harness is a db-only
+  field (`saveDb`, not a plan-file write). prefs gives `copilot` no `pickerKey`, so it isn't offered here
+  unless a higher layer adds one. Blocked while a session is live.
 - **V — view plan**: opens the selected plan file via `Open-FileInEditor` (the `e` alias's target;
   prat-deployed, so available in the interactive profile pl runs under). No-op if that alias isn't
   installed.
@@ -258,7 +247,7 @@ headless-capable (`headlessFlag` on its descriptor, checked via `harnessSupports
 launch. The `automatable` field is hand-written beside `workflow` and `commit-grant`: `*` for every
 step, or a comma list of numbers and inclusive ranges (`16-19`, `16, 19`); an absent field means no
 step is automatable, so such a plan never hands off. A de-supplied harness declares its flag via
-`headlessFlag` on its `Get-AgentHarnesses.ps1` entry, beside `commitGrantArgs`.
+`headlessFlag` on its `harnesses_<layer>.ps1` entry, beside `commitGrantArgs`.
 
 The run is a loop: one fresh, headless launch per step (`getFreshSessionArgs` + `--headless`), each
 resolving its own phase/prompt from a fresh `Get-PlanState` read the way Enter's own dispatch does,
@@ -316,22 +305,12 @@ the harness's own output on screen above it.
 
 ## Live-session detection
 
-Thanks to wrapping harnesses with 'cl', every harness carries its session id on its own live process command line.
-So pl scans process command lines directly (`getLiveSessionRecords`, one call per harness) and resolves them
-against the db (`resolveHarnessSessions`) — id match first, then (copilot only) a cwd-match fallback
-to a sole unoccupied entry. Anything left unmatched is an orphan (`R` is the repair).
-
-- **Claude**: `--session-id <uuid>` (fresh, added by pl — see Resume/Fresh above) or `--resume <sid>`
-  (resume). No cwd appears on the command line, and pl-launched claude sessions don't need cwd-matching —
-  bare `cl` launches without pl always get a generated `--session-id` too (`Invoke-ClHook` in de's
-  `Start-CommandLineAgent.ps1`), so every claude session is at least discoverable as an orphan.
-- **Copilot**: session id and cwd are parsed from live `copilot.exe` command lines (`--session-id`/
-  `--resume`, `-C`) — copilot's own launcher supplies these unprompted, no pl involvement needed. Unmatched
-  sessions are cwd-matched to a sole unoccupied entry, else orphaned.
-- **A custom harness** (`Get-AgentHarnesses`, see Configuration below): scanned only if its descriptor
-  supplies `liveProcessName`, filtered by `liveCmdlineFilter` when the process name alone would be too
-  generic (e.g. a bare interpreter like `python.exe` shared by unrelated processes). No cwd-match
-  fallback, same as claude.
+A pl-launched session carries its id on its command line: `--resume` on a resume, and on a fresh launch
+the harness launcher's own id or pl's (`getFreshSessionArgs`). So pl scans process command lines
+directly (`getLiveSessionRecords`, one call per harness that declares `liveProcessName`) and resolves
+them against the db (`resolveHarnessSessions`): id match first, then, for a harness with
+`liveCwdMatch`, a fallback to the sole unoccupied entry with the same cwd. Anything left unmatched is
+an orphan (`R` is the repair).
 
 ## Cross-machine visibility
 
@@ -354,26 +333,20 @@ Deliberately deferred as of 2026-07; presence files carrying live session ids is
 
 - **Plans dir**: `Resolve-PratLibFile 'lib/agents/Get-PlansDir.ps1'` (de-supplied). Without it, `O` is
   unavailable and `R` can only target already-tracked plans.
-- **Harness**: each db entry carries a `harness`, defaulted via `getDefaultHarness`
-  (`(Get-AgentHarnesses)[0].name`) and stamped by live-process detection when it matches a session.
-  `Get-AgentHarnesses` is *required* (unlike the optional `Get-AgentModelList`) but only *selects*
-  which harnesses de uses and their order. A harness is fully inactive — not offered in the `H` menu,
-  not live-scanned, not resumable — unless its name is listed, even a well-known one: claude/
-  copilot/pi's own properties come from prefs's built-in `getBuiltinHarnessDescriptors` and can't be
-  reconfigured via the registry, but the registry still has to name them to turn them on (a bare
-  `@{ name = 'copilot' }` entry is enough). A name prefs has no built-in for is the *augmenting*
-  case: see the next bullet. pi is live-detected (as `node.exe`, filtered by its script path since
-  that process name is generic — see `Invoke-AgentSession.ps1` for its launch-arg handling) but not
-  resumable: its `--resume` takes no session id (it shows its own interactive menu instead), so pl
-  has no way to resume one specific past session non-interactively.
-- **`Get-AgentHarnesses`** (de-supplied, required — called bare-name): returns an array of
-  `@{ name = '<harness>'; ... }`, first entry = default. Extra properties only matter for a harness
-  name prefs doesn't already know (claude/copilot): `pickerKey` (offered in the `H` menu),
-  `liveProcessName`/`liveCmdlineFilter` (live-process scan — the filter matters when the process name
-  alone is too generic, e.g. a bare interpreter shared by unrelated processes), `liveCwdMatch`
-  (cwd-match fallback for a harness whose command line carries one), `sessionsDir` (resumable-session
-  lookup reads this harness's own flat `<sessionsDir>/<sid>.jsonl` files — `getFlatSessionInfos`/
-  `getFlatSessionSummary`, summarized from the first logged `user_message` event) or `sessionInfoStyle
-  = 'claude-projects'` (reads the CC-style `~/.claude/projects/*/<sid>.jsonl` layout instead — claude/
-  copilot's built-in style, opt-in-able for a custom harness stored the same way). A custom harness
-  with none of these is still launchable, just not live-detected or resumable through pl.
+- **Harness**: each db entry carries a `harness`, defaulted via `getDefaultHarness` (the first selected
+  harness) and stamped by live-process detection when it matches a session.
+- **Harness registry** (`lib/agents/agentHarnesses.ps1`): each layer may contribute a
+  `lib/agents/harnesses_<layer>.ps1`. prefs's describes claude/copilot/pi; a higher layer (de) declares
+  `selected`, the harnesses it uses in order (first = default), and can describe a harness of its own
+  or override a built-in's property. A harness is fully inactive in pl (not offered in the `H` menu,
+  not live-scanned, not resumable) unless it's selected, even a well-known one. pi is live-detected
+  (as `node.exe`, filtered by its script path since that process name is generic) but not resumable:
+  its `--resume` takes no session id (it shows its own interactive menu instead), so pl has no way to
+  resume one specific past session non-interactively. The properties pl reads: `pickerKey` (offered in
+  the `H` menu), `liveProcessName`/`liveCmdlineFilter` (live-process scan; the filter matters when the
+  process name alone is too generic, e.g. a bare interpreter shared by unrelated processes),
+  `liveCwdMatch` (cwd-match fallback for a harness whose command line carries one), and the session
+  log store: either `sessionsDir`, a flat `<sessionsDir>/<sid>.jsonl` (`getFlatSessionInfos`/
+  `getFlatSessionSummary`), or `sessionInfoStyle = 'claude-projects'`, Claude Code's
+  `~/.claude/projects/*/<sid>.jsonl` with its `sessions-index.json` (that root is fixed, whichever harness
+  declares the style). A custom harness with neither is still launchable, just not resumable through pl.

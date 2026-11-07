@@ -4,6 +4,9 @@
         writing       = @('kql-techniques', 'drafting-for-others')
         planLifecycle = @('end-plan')
         repoCuration  = @('review-repo-skills')
+        workstreams   = @('update-workstream-id')
     }
+    # Skills the always-loaded agent-user_prefs.md tells every session to use.
+    everyRoleSkillGroups = @('workstreams')
 }
 # OmitFromCoverageReport: a unit test would just restate it - static skill-group data

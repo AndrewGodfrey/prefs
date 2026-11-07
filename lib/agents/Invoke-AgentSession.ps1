@@ -18,30 +18,12 @@ for ($i = 0; $i -lt $PassThroughArgs.Count - 1; $i++) {
     if ($PassThroughArgs[$i] -eq '--resume') { $resumeSid = $PassThroughArgs[$i + 1]; break }
 }
 
-# Prefs's own knowledge of claude's and pi's args — the only harness-specific data hardcoded in this
-# file. de's Get-AgentHarnesses doesn't need to repeat this to select either; it only matters for a
-# harness prefs has no built-in knowledge of (the "augmenting" case in getHarnessDescriptor below).
-# pi has no supportsAddDir (it has never gotten --add-dir — preserved here, not a new choice) and an
-# additionalArgs tail (its --skill flag) beyond what claude needs; additionalArgs is generic, so a
-# de-supplied custom harness could use it too. copilot keeps its own switch case below (a bespoke
-# file-based context injection, not reducible to these properties); any other harness (built-in or a
-# de-supplied custom one) is handled generically in `default`.
-function getBuiltinHarnessDescriptors {
-    return @(
-        @{ name = 'claude'; supportsAddDir = $true; contextArgStyle = 'append-system-prompt' }
-        @{ name = 'pi'; contextArgStyle = 'append-system-prompt'; additionalArgs = @('--skill', './.claude/skills/') }
-    )
-}
+. "$PSScriptRoot/agentHarnesses.ps1"
 
-# The descriptor for one harness: the built-in if it's claude/pi, else its own entry from the
-# registry (the augmenting case — a harness prefs has no built-in knowledge of supplies its full
-# descriptor itself). $null for copilot (handled by its own switch case) or a name neither source
-# knows.
+# Any harness a layer describes, selected or not (e.g. `cl -Pi` where pi isn't selected). copilot keeps
+# its own switch case below; every other harness is handled generically, from its descriptor, in `default`.
 function getHarnessDescriptor([string] $harness) {
-    if ($harness -eq 'copilot') { return $null }
-    $builtin = @(getBuiltinHarnessDescriptors | Where-Object { $_.name -eq $harness }) | Select-Object -First 1
-    if ($builtin) { return $builtin }
-    return @(Get-AgentHarnesses | Where-Object { $_ -and $_.name -eq $harness }) | Select-Object -First 1
+    return @(Get-AgentHarnessDescriptors -All | Where-Object { $_.name -eq $harness }) | Select-Object -First 1
 }
 
 # What a harness with no commit tool is told instead of flags. Says when to commit as well as what is

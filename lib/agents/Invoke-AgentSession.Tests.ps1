@@ -8,6 +8,14 @@ BeforeAll {
         param([string] $RoleDir, [string] $TargetRepo = $null, [string] $ContextMessage = $null)
         @{ roleName = 'testrole'; roleDir = $RoleDir; targetRepo = $TargetRepo; contextMessage = $ContextMessage }
     }
+
+    # prefs's real built-ins plus, optionally, a higher layer's own harnesses: the per-machine de
+    # layer is left out. For `Mock Get-AgentHarnessContributions`.
+    . "$PSScriptRoot/agentHarnesses.ps1"
+    function harnessLayers([hashtable] $harnesses = @{}) {
+        @((& "$PSScriptRoot/harnesses_prefs.ps1"), @{ harnesses = $harnesses })
+    }
+    Mock Get-AgentHarnessContributions { harnessLayers }
 }
 
 Describe "Invoke-AgentSession" {
@@ -52,23 +60,6 @@ Describe "Invoke-AgentSession" {
             $idx = [array]::IndexOf([object[]]$captured.allArgs, '--append-system-prompt')
             $idx | Should -BeGreaterOrEqual 0
             $captured.allArgs[$idx + 1] | Should -BeLike '*C:/repos/myrepo*'
-        }
-    }
-
-    Context "claude's args come from prefs's own built-in, not a switch case — but de can't reconfigure them" {
-        BeforeAll {
-            $roleDir  = (New-Item "TestDrive:/role-claude-override" -ItemType Directory).FullName
-            $ctx      = New-MockCtx -RoleDir $roleDir -TargetRepo 'C:/repos/myrepo' -ContextMessage 'work on C:/repos/myrepo'
-            $captured = @{}
-            $hook = { param($resumeSid, $allArgs) $captured.allArgs = $allArgs }
-        }
-
-        It "keeps --add-dir and --append-system-prompt even if the registry tries to reconfigure claude (de selects, doesn't configure)" {
-            function Get-AgentHarnesses { @(@{ name = 'claude'; supportsAddDir = $false; contextArgStyle = 'none' }) }
-
-            & $script -Harness 'claude' -LaunchHook $hook -Context $ctx
-            $captured.allArgs | Should -Contain '--add-dir'
-            $captured.allArgs | Should -Contain '--append-system-prompt'
         }
     }
 
@@ -232,7 +223,7 @@ Describe "Invoke-AgentSession" {
         }
 
         It "passes through args with no --add-dir and no --append-system-prompt (bare passthrough)" {
-            function Get-AgentHarnesses { @(@{ name = 'customtool' }) }
+            Mock Get-AgentHarnessContributions { harnessLayers @{ customtool = @{} } }
 
             & $script -Harness 'customtool' -LaunchHook $hook -Context $ctx 'someArg'
             $captured.allArgs | Should -Not -Contain '--add-dir'
@@ -252,8 +243,8 @@ Describe "Invoke-AgentSession" {
             { & $script -Harness 'unknown' -LaunchHook $hook -Context $ctx } | Should -Throw "Unknown harness*"
         }
 
-        It "throws for a harness absent from Get-AgentHarnesses even when the command exists" {
-            function Get-AgentHarnesses { @(@{ name = 'customtool' }) }
+        It "throws for a harness no layer describes, even when another custom one exists" {
+            Mock Get-AgentHarnessContributions { harnessLayers @{ customtool = @{} } }
 
             { & $script -Harness 'somethingelse' -LaunchHook $hook -Context $ctx } | Should -Throw "Unknown harness*"
         }
@@ -267,10 +258,10 @@ Describe "Invoke-AgentSession" {
             $hook = { param($resumeSid, $allArgs) $captured.allArgs = $allArgs }
             # A renderer wins over the prose even for a harness that could carry prose, so a harness
             # that writes its own grant section is never told twice.
-            function Get-AgentHarnesses {
-                @(@{ name = 'flagtool'; contextArgStyle = 'append-system-prompt'
-                     commitGrantArgs = { param([string] $branch, [string[]] $repoPaths)
-                                         @($repoPaths | ForEach-Object { '--grant-repo'; $_ }) + @('--grant-branch', $branch) } })
+            Mock Get-AgentHarnessContributions {
+                harnessLayers @{ flagtool = @{ contextArgStyle = 'append-system-prompt'
+                                               commitGrantArgs = { param([string] $branch, [string[]] $repoPaths)
+                                                                   @($repoPaths | ForEach-Object { '--grant-repo'; $_ }) + @('--grant-branch', $branch) } } }
             }
         }
 
@@ -344,7 +335,7 @@ Describe "Invoke-AgentSession" {
             $ctx      = New-MockCtx -RoleDir $roleDir
             $captured = @{}
             $hook = { param($resumeSid, $allArgs) $captured.allArgs = $allArgs }
-            function Get-AgentHarnesses { @(@{ name = 'customtool' }) }
+            Mock Get-AgentHarnessContributions { harnessLayers @{ customtool = @{} } }
         }
 
         It "warns, and launches with no grant flags" {

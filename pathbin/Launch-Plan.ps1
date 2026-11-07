@@ -11,6 +11,7 @@ param([switch] $NoSyncBackedWarning)
 $dbPath = "$home/prat/auto/context/db.json"
 
 . "$home/prat/lib/agents/PlanState.ps1"
+. "$PSScriptRoot/../lib/agents/agentHarnesses.ps1"
 
 # Per-launch wall-clock cap for a branch-review launch, in seconds. Bounds a single launch itself,
 # which the run's preflight budgets (50-launch, 12-hour) do not. Sized for a slow local model
@@ -1597,44 +1598,19 @@ function getResumeArgs([string] $harness, [string] $sid) {
 
 # --- Harness registry ---
 
-# Thin wrapper (mockable in tests) over the required de-supplied harness list
-function getAgentHarnesses {
-    return @(Get-AgentHarnesses)
+# Only the harnesses the layers select (agentHarnesses.ps1). One that prefs knows about but no layer
+# selects is fully inactive: not offered, not live-scanned, not resumable.
+function getHarnessDescriptors {
+    return @(Get-AgentHarnessDescriptors)
 }
 
 function getDefaultHarness {
-    return (getAgentHarnesses)[0].name
+    return (getHarnessDescriptors)[0].name
 }
 
-# Noe: pi's --resume takes no session id (it shows its own interactive menu instead), so only live-detection and 
-# fresh-launch are supported for now.
-#
-# Picker keys must stay unique across this list.
-function getBuiltinHarnessDescriptors {
-    return @(
-        @{ name = 'claude'; liveProcessName = 'claude.exe'; sessionInfoStyle = 'claude-projects'; pickerKey = 'C' }
-        @{ name = 'copilot'; liveProcessName = 'copilot.exe'; liveCwdMatch = $true; sessionInfoStyle = 'claude-projects' }
-        @{ name = 'pi'; liveProcessName = 'node.exe'; liveCmdlineFilter = 'pi-coding-agent'; pickerKey = '3' }
-    )
-}
-
-# The descriptor for one harness — $null unless it's selected (its name appears in Get-AgentHarnesses,
-# even bare). A selected well-known harness (claude/copilot/pi) always resolves to prefs's own
-# built-in properties, ignoring anything else its registry entry says; a selected name with no
-# built-in (the "augmenting" case) uses its own registry entry directly. A built-in prefs knows about
-# but de hasn't selected is fully inactive — not offered, not live-scanned, not resumable.
+# $null unless $harness is selected.
 function getHarnessDescriptor([string] $harness) {
-    $selectedNames = @(getAgentHarnesses | Where-Object { $_ -and $_.name } | ForEach-Object { $_.name })
-    if ($harness -notin $selectedNames) { return $null }
-    $builtin = @(getBuiltinHarnessDescriptors | Where-Object { $_.name -eq $harness }) | Select-Object -First 1
-    if ($builtin) { return $builtin }
-    return @(getAgentHarnesses | Where-Object { $_ -and $_.name -eq $harness }) | Select-Object -First 1
-}
-
-# Every harness de has selected, resolved the same way as getHarnessDescriptor.
-function getHarnessDescriptors {
-    $selectedNames = @(getAgentHarnesses | Where-Object { $_ -and $_.name } | ForEach-Object { $_.name } | Select-Object -Unique)
-    return @($selectedNames | ForEach-Object { getHarnessDescriptor $_ } | Where-Object { $_ })
+    return @(getHarnessDescriptors | Where-Object { $_.name -eq $harness }) | Select-Object -First 1
 }
 
 # Whether $descriptor can run a headless launch — the flag it declares (a harness-specific string,
@@ -1653,8 +1629,8 @@ function getHeadlessArgs($descriptor) {
 # --- Model picker ---
 
 # Thin wrapper over the optional de-specific model list command (mockable in tests). Bare-name
-# invocation. Unlike Get-AgentHarnesses this one is genuinely optional: non-de users and unlisted
-# harnesses see no command on PATH, so this returns $null rather than throwing.
+# invocation. Optional: non-de users and unlisted harnesses see no command on PATH, so this returns
+# $null rather than throwing.
 function tryInvokeAgentModelList {
     $cmd = Get-Command Get-AgentModelList -ErrorAction Ignore
     if (-not $cmd) { return $null }

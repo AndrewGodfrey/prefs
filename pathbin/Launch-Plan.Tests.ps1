@@ -5,6 +5,12 @@ BeforeDiscovery {
 BeforeAll {
     Import-Module "$home/prat/lib/PratBase/PratBase.psd1" -Force
     . "$PSScriptRoot/Launch-Plan.ps1"
+
+    # The harness layers with prefs's real built-ins and a stand-in for de's (per-machine) selection.
+    # For `Mock Get-AgentHarnessContributions`.
+    function harnessLayers([string[]] $selected, [hashtable] $harnesses = @{}) {
+        @((& "$PSScriptRoot/../lib/agents/harnesses_prefs.ps1"), @{ selected = $selected; harnesses = $harnesses })
+    }
 }
 
 Describe "loadDb" {
@@ -617,98 +623,33 @@ Describe "getResumeArgs" {
     }
 }
 
-Describe "getAgentHarnesses" {
-    It "invokes Get-AgentHarnesses and returns its list" {
-        function Get-AgentHarnesses { @(@{ name = 'claude' }, @{ name = 'customtool' }) }
-
-        @((getAgentHarnesses).name) | Should -Be @('claude', 'customtool')
-    }
-}
-
 Describe "getDefaultHarness" {
-    It "returns the first entry's name" {
-        Mock getAgentHarnesses { @(@{ name = 'customtool' }, @{ name = 'claude' }) }
+    It "returns the first selected harness" {
+        Mock Get-AgentHarnessContributions { harnessLayers @('customtool', 'claude') }
 
         getDefaultHarness | Should -Be 'customtool'
     }
 }
 
-Describe "getBuiltinHarnessDescriptors" {
-    It "includes claude with its live-process and session-info defaults" {
-        $claude = @(getBuiltinHarnessDescriptors | Where-Object { $_.name -eq 'claude' })[0]
-
-        $claude.liveProcessName  | Should -Be 'claude.exe'
-        $claude.sessionInfoStyle | Should -Be 'claude-projects'
-        $claude.pickerKey        | Should -Be 'C'
-    }
-
-    It "includes copilot with cwd-matching enabled" {
-        $copilot = @(getBuiltinHarnessDescriptors | Where-Object { $_.name -eq 'copilot' })[0]
-
-        $copilot.liveProcessName  | Should -Be 'copilot.exe'
-        $copilot.liveCwdMatch     | Should -BeTrue
-        $copilot.sessionInfoStyle | Should -Be 'claude-projects'
-    }
-
-    It "includes pi, filtered by its script path since it runs as the generic node.exe" {
-        $pi = @(getBuiltinHarnessDescriptors | Where-Object { $_.name -eq 'pi' })[0]
-
-        $pi.liveProcessName   | Should -Be 'node.exe'
-        $pi.liveCmdlineFilter | Should -Be 'pi-coding-agent'
-    }
-
-    It "picker keys are unique across the built-ins" {
-        $keys = @(getBuiltinHarnessDescriptors | Where-Object { $_.pickerKey } | ForEach-Object { $_.pickerKey })
-
-        ($keys | Select-Object -Unique).Count | Should -Be $keys.Count
-    }
-}
-
 Describe "getHarnessDescriptor" {
-    It "returns claude's built-in descriptor even if the registry lists it too (de just selects it, doesn't configure it)" {
-        Mock getAgentHarnesses { @(@{ name = 'claude'; pickerKey = 'X' }) }
+    It "returns a selected built-in with prefs's properties" {
+        Mock Get-AgentHarnessContributions { harnessLayers @('claude') }
 
         (getHarnessDescriptor 'claude').liveProcessName | Should -Be 'claude.exe'
-        (getHarnessDescriptor 'claude').pickerKey       | Should -Be 'C'
     }
 
-    It "returns the registry's own entry for a harness with no built-in (the augmenting case)" {
-        Mock getAgentHarnesses { @(@{ name = 'customtool'; sessionsDir = 'C:/x' }) }
+    It "returns null for a built-in no layer selects" {
+        Mock Get-AgentHarnessContributions { harnessLayers @('claude') }
 
-        (getHarnessDescriptor 'customtool').sessionsDir | Should -Be 'C:/x'
-    }
-
-    It "returns null for an unregistered, non-built-in harness name" {
-        Mock getAgentHarnesses { @(@{ name = 'customtool' }) }
-
-        getHarnessDescriptor 'somethingelse' | Should -BeNullOrEmpty
+        getHarnessDescriptor 'pi' | Should -BeNullOrEmpty
     }
 }
 
 Describe "getHarnessDescriptors" {
-    It "only includes a built-in de has actually selected" {
-        Mock getAgentHarnesses { @(@{ name = 'claude' }) }
+    It "includes the selected harnesses in selection order, with a higher layer's own harness" {
+        Mock Get-AgentHarnessContributions { harnessLayers @('customtool', 'claude') @{ customtool = @{ pickerKey = 'X' } } }
 
-        @((getHarnessDescriptors).name) | Should -Be @('claude')
-    }
-
-    It "includes multiple selected built-ins, in registry order" {
-        Mock getAgentHarnesses { @(@{ name = 'claude' }, @{ name = 'pi' }) }
-
-        @((getHarnessDescriptors).name) | Should -Be @('claude', 'pi')
-    }
-
-    It "ignores a registry entry that just re-selects a built-in by name" {
-        Mock getAgentHarnesses { @(@{ name = 'claude'; pickerKey = 'X' }) }
-
-        $claude = @(getHarnessDescriptors | Where-Object { $_.name -eq 'claude' })[0]
-        $claude.pickerKey | Should -Be 'C'
-    }
-
-    It "appends a registry-only entry that has no built-in, without pulling in unselected built-ins" {
-        Mock getAgentHarnesses { @(@{ name = 'claude' }, @{ name = 'customtool'; pickerKey = 'X' }) }
-
-        @((getHarnessDescriptors).name) | Should -Be @('claude', 'customtool')
+        @((getHarnessDescriptors).name) | Should -Be @('customtool', 'claude')
     }
 }
 
@@ -2015,7 +1956,7 @@ Describe "openProject" {
         $plan  = newPlan 'fresh-carries' 'ready-to-implement'
         $entry = newEntry $plan @() 'other'
         $db    = newDb $entry
-        Mock getAgentHarnesses { @(@{ name = 'customtool'; pickerKey = 'C' }, @{ name = 'other'; pickerKey = 'O' }) }
+        Mock Get-AgentHarnessContributions { harnessLayers @('customtool', 'other') @{ customtool = @{ pickerKey = 'C' }; other = @{ pickerKey = 'O' } } }
         $script:pickerItems = $null
         Mock pickFromList { $script:pickerItems = $items; return 0 }
 
@@ -3343,6 +3284,8 @@ Describe "defaultsToFreshPicker" {
 
 Describe "getSessionInfos" {
     BeforeAll {
+        # The harness selection is per-machine de config; pin it so these tests don't depend on 'claude' being selected here.
+        Mock Get-AgentHarnessContributions { harnessLayers @('claude') }
         $script:projRoot = ((New-Item -ItemType Directory "TestDrive:\cc-projects").FullName -replace '\\', '/').TrimEnd('/')
         $null = New-Item -ItemType Directory "$script:projRoot/proj-a"
         $null = New-Item -ItemType Directory "$script:projRoot/proj-b"
@@ -3949,31 +3892,25 @@ Describe "changeState" {
 
 Describe "getHarnessPickerOptions" {
     It "includes a selected built-in at its key" {
-        Mock getAgentHarnesses { @(@{ name = 'claude' }) }
+        Mock Get-AgentHarnessContributions { harnessLayers @('claude') }
 
         (getHarnessPickerOptions)['C'] | Should -Be 'claude'
     }
 
     It "excludes an unselected built-in even though prefs knows its properties" {
-        Mock getAgentHarnesses { @(@{ name = 'claude' }) }
+        Mock Get-AgentHarnessContributions { harnessLayers @('claude') }
 
         (getHarnessPickerOptions).Contains('3') | Should -BeFalse
     }
 
     It "includes a custom harness at its own pickerKey" {
-        Mock getAgentHarnesses { @(@{ name = 'customtool'; pickerKey = 'X' }) }
+        Mock Get-AgentHarnessContributions { harnessLayers @('customtool') @{ customtool = @{ pickerKey = 'X' } } }
 
         (getHarnessPickerOptions)['X'] | Should -Be 'customtool'
     }
 
-    It "a registry entry can't add a pickerKey to a built-in (de selects claude/copilot, doesn't configure them)" {
-        Mock getAgentHarnesses { @(@{ name = 'copilot'; pickerKey = 'G' }) }
-
-        (getHarnessPickerOptions).Contains('G') | Should -BeFalse
-    }
-
     It "excludes a custom harness with no pickerKey" {
-        Mock getAgentHarnesses { @(@{ name = 'claude' }, @{ name = 'customtool' }) }
+        Mock Get-AgentHarnessContributions { harnessLayers @('claude', 'customtool') }
 
         @((getHarnessPickerOptions).Keys) | Should -Be @('C')
     }
@@ -3984,7 +3921,7 @@ Describe "changeHarness" {
         Mock saveDb { }
         Mock Write-Host { }
         Mock clearConsole { }
-        Mock getAgentHarnesses { @(@{ name = 'claude' }, @{ name = 'customtool'; pickerKey = 'X' }) }
+        Mock Get-AgentHarnessContributions { harnessLayers @('claude', 'customtool') @{ customtool = @{ pickerKey = 'X' } } }
     }
 
     It "writes the picked harness to the db entry" -TestCases @(

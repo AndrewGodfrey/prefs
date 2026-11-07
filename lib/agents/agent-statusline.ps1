@@ -1,6 +1,7 @@
-param([switch] $NoCwd)
+param([switch] $NoCwd, [switch] $NoModel, [switch] $NoSandbox)
 Import-Module "$home\prat\lib\PratBase\PratBase.psd1" -ErrorAction SilentlyContinue
 . "$home/prat/lib/agents/PlanState.ps1"
+. "$PSScriptRoot/sessionWorkstream.ps1"
 
 # Returns a formatted rate-limit display string, or nothing if the window is too new or too close to reset.
 # Color: yellow-green = on pace to exhaust; yellow = within $yellowThresholdMins; orange = within $redThresholdMins; red = completely out.
@@ -74,9 +75,13 @@ function Format-LocationString($project, $cwd) {
     }
 }
 
-function Get-StatusLineString($j, $now, [switch] $NoCwd) {
+function Get-StatusLineString($j, $now, [switch] $NoCwd, [switch] $NoModel, [switch] $NoSandbox, [string] $WorkstreamDir = (Get-SessionWorkstreamDir)) {
     $bar = Get-ContextBar $j
     $rlStr = Get-RateLimitBarString $j.rate_limits $now
+
+    # Set by the agent via Set-SessionWorkstreamId.
+    $workstreamId = Read-SessionWorkstreamId $j.session_id $WorkstreamDir
+    $workstreamStr = if ($workstreamId) { " $workstreamId" } else { '' }
 
     $loc = ''
     if (-not $NoCwd) {
@@ -96,17 +101,20 @@ function Get-StatusLineString($j, $now, [switch] $NoCwd) {
     } else { '' }
 
     # Set by cl (Start-CommandLineAgent.ps1) at launch; absent for sessions not launched that way.
-    $sandboxWarn = if ($env:CL_SANDBOX_MODE -ne '1') { "`e[38;2;255;200;0m*`e[0m " } else { '' }
+    # -NoSandbox: for machines with no sandbox, where the marker would always show.
+    $sandboxWarn = if ($env:CL_SANDBOX_MODE -ne '1' -and -not $NoSandbox) { "`e[38;2;255;200;0m*`e[0m " } else { '' }
 
-    # Model used for the last turn (Claude Code sends the model active for the response just completed)
-    $modelStr = if ($j.model.display_name) { "   ($($j.model.display_name))" } else { '' }
+    # Model used for the last turn (Claude Code sends the model active for the response just completed).
+    # -NoModel: for harnesses whose own footer already shows it (e.g. Copilot CLI).
+    $modelStr = if ($j.model.display_name -and -not $NoModel) { "   ($($j.model.display_name))" } else { '' }
 
-    "$sandboxWarn$bar$loc$planStr$rlStr$modelStr"
+    "$sandboxWarn$bar$workstreamStr$loc$planStr$rlStr$modelStr"
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
     [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
     $j = [Console]::In.ReadToEnd() | ConvertFrom-Json
     $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-    Write-Host (Get-StatusLineString $j $now -NoCwd:$NoCwd)
+    Write-Host (Get-StatusLineString $j $now -NoCwd:$NoCwd -NoModel:$NoModel -NoSandbox:$NoSandbox)
 }

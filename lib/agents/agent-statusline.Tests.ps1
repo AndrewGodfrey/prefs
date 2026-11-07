@@ -165,6 +165,16 @@ Describe "claude-statusline" {
             }
         }
 
+        It "hides the sandbox warning marker when -NoSandbox is set" {
+            $prev = $env:CL_SANDBOX_MODE
+            try {
+                Remove-Item Env:\CL_SANDBOX_MODE -ErrorAction SilentlyContinue
+                Get-StatusLineString @{ cwd = $env:TEMP } $script:now -NoCwd -NoSandbox | Should -Not -Match '\*'
+            } finally {
+                if ($null -ne $prev) { $env:CL_SANDBOX_MODE = $prev } else { Remove-Item Env:\CL_SANDBOX_MODE -ErrorAction SilentlyContinue }
+            }
+        }
+
         It "shows the model name when present" {
             Get-StatusLineString @{ cwd = $env:TEMP; model = @{ display_name = 'Sonnet 5' } } $script:now -NoCwd |
                 Should -Match '\s{3}\(Sonnet 5\)'
@@ -172,6 +182,27 @@ Describe "claude-statusline" {
 
         It "omits the model segment when absent" {
             Get-StatusLineString @{ cwd = $env:TEMP } $script:now -NoCwd | Should -Not -Match '\('
+        }
+
+        It "omits the model segment when -NoModel is set" {
+            Get-StatusLineString @{ cwd = $env:TEMP; model = @{ display_name = 'Sonnet 5' } } $script:now -NoCwd -NoModel |
+                Should -Not -Match 'Sonnet'
+        }
+
+        It "shows the session's workstream id after the context bar" {
+            $dir = (New-Item -ItemType Directory "TestDrive:\workstreams").FullName
+            Set-Content "$dir\sess-1.txt" 'myproj-123' -NoNewline
+
+            Get-StatusLineString @{ cwd = $env:TEMP; session_id = 'sess-1' } $script:now -NoCwd -WorkstreamDir $dir |
+                Should -Match '[▰▱]{5} myproj-123'
+        }
+
+        It "omits the workstream segment when the session has no workstream id" {
+            $dir = (New-Item -ItemType Directory "TestDrive:\workstreams-other" -Force).FullName
+            Set-Content "$dir\sess-1.txt" 'myproj-123' -NoNewline
+
+            Get-StatusLineString @{ cwd = $env:TEMP; session_id = 'sess-2' } $script:now -NoCwd -WorkstreamDir $dir |
+                Should -Not -Match 'myproj'
         }
 
         It "omits location when -NoCwd is set" {
@@ -189,6 +220,31 @@ Describe "claude-statusline" {
             } | ConvertTo-Json -Depth 5
             $out = ($json | pwsh -NoProfile -File "$PSScriptRoot/agent-statusline.ps1") -join ''
             $out | Should -Match '5h:'
+        }
+
+        It "round-trips non-ASCII payload text as UTF-8" {
+            # Copilot writes the payload as UTF-8 and decodes our stdout as UTF-8 (e.g. its
+            # display_name "claude-opus-5.5 · medium"), regardless of the console's OEM code page.
+            $psi = [System.Diagnostics.ProcessStartInfo]::new('pwsh')
+            foreach ($a in '-NoProfile', '-File', "$PSScriptRoot/agent-statusline.ps1", '-NoCwd') { $psi.ArgumentList.Add($a) }
+            $psi.RedirectStandardInput  = $true
+            $psi.RedirectStandardOutput = $true
+            $psi.StandardInputEncoding  = [System.Text.UTF8Encoding]::new($false)
+            $psi.StandardOutputEncoding = [System.Text.UTF8Encoding]::new($false)
+            $psi.UseShellExecute        = $false
+            $p = [System.Diagnostics.Process]::Start($psi)
+            $p.StandardInput.Write('{"model":{"display_name":"m · x"}}')
+            $p.StandardInput.Close()
+            $out = $p.StandardOutput.ReadToEnd()
+            $p.WaitForExit()
+
+            $out | Should -Match '\(m · x\)'
+        }
+
+        It "passes -NoModel and -NoSandbox through from the command line" {
+            $out = ('{"model":{"display_name":"Sonnet 5"}}' | pwsh -NoProfile -File "$PSScriptRoot/agent-statusline.ps1" -NoCwd -NoModel -NoSandbox) -join ''
+            $out | Should -Not -Match 'Sonnet'
+            $out | Should -Not -Match '\*'
         }
     }
 
