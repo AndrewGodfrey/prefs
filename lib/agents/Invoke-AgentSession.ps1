@@ -13,6 +13,12 @@ param(
     [Parameter(ValueFromRemainingArguments = $true)] [string[]] $PassThroughArgs
 )
 
+# A bare launch reaches this with no passthrough, so $PassThroughArgs is $null; a null right
+# operand to + is appended as a scalar, turning the hook's args into @($null). Normalize to an
+# empty array so every downstream + is safe. (An empty string that is a *value* — e.g. `--set-foo ''`
+# — is a real element, not $null, so it passes through untouched.)
+if ($null -eq $PassThroughArgs) { $PassThroughArgs = @() }
+
 $resumeSid = $null
 for ($i = 0; $i -lt $PassThroughArgs.Count - 1; $i++) {
     if ($PassThroughArgs[$i] -eq '--resume') { $resumeSid = $PassThroughArgs[$i + 1]; break }

@@ -39,6 +39,25 @@ Describe "Invoke-AgentSession" {
             $captured.allArgs | Should -Contain 'bar'
         }
     }
+    Context "bare launch — no passthrough args" {
+        BeforeAll {
+            $roleDir  = (New-Item "TestDrive:/role-bare" -ItemType Directory).FullName
+            $ctx      = New-MockCtx -RoleDir $roleDir
+            $captured = @{}
+            $hook = { param($resumeSid, $allArgs) $captured.allArgs = $allArgs }
+            Mock Get-AgentHarnessContributions { harnessLayers @{ baretool = @{} } }
+        }
+
+        It "drops a null passthrough (no trailing args), which + would otherwise append as a scalar" {
+            & $script -Harness 'baretool' -LaunchHook $hook -Context $ctx
+            @($captured.allArgs).Count | Should -Be 0
+        }
+
+        It "preserves an empty string that is a flag's value (e.g. --set-foo '')" {
+            & $script -Harness 'baretool' -LaunchHook $hook -Context $ctx '--set-foo' ''
+            @($captured.allArgs) | Should -Be @('--set-foo', '')
+        }
+    }
 
     Context "bound-repo project — targetRepo and contextMessage set" {
         BeforeAll {
