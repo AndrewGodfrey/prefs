@@ -19,18 +19,21 @@ environment, and prints nothing on success. If it fails, report that and carry o
 
 ## Session name
 
-The name becomes `<id>: <original session name>`, e.g. `12345: Allocation cleanup`. The user authorizes
+The workstream's first session is named the bare ID, e.g. `12345-startupPerf`. A later session sharing the
+workstream becomes `<id>: <original session name>`, e.g. `12345-startupPerf: Allocation cleanup`. Treat this
+session as the first unless the workflow that supplied the ID records another session for it. Keep a
+session's form once set; don't rename the first session when a later one joins. The user authorizes
 replacing an existing or user-chosen name this way; pass `force: true` if the tool needs it.
 
 1. Read the current session name from the session tools. If you can't, report that; don't invent a title.
    Never edit the app's database.
-2. The original name is the current one, minus a leading `<id>: ` if that is an ID you set earlier in this
-   session. Strip nothing else before a colon.
+2. For a later session, the original name is the current one, minus a leading `<id>: ` if that is an ID you
+   set earlier in this session. Strip nothing else before a colon.
 3. Compute the name with [Get-WorkstreamSessionName.ps1](Get-WorkstreamSessionName.ps1), passing the rename
-   tool's declared length limit (`rename_session`: 40):
+   tool's declared length limit (`rename_session`: 40). Omit `-OriginalSessionName` for the first session:
 
    ```powershell
-   & '<skill-directory>/Get-WorkstreamSessionName.ps1' -WorkstreamId '12345' -OriginalSessionName 'Allocation cleanup' -MaxLength 40
+   & '<skill-directory>/Get-WorkstreamSessionName.ps1' -WorkstreamId '12345-startupPerf' -OriginalSessionName 'Allocation cleanup' -MaxLength 40
    ```
 
 4. If that differs from the current name, rename. Report a refusal as is.

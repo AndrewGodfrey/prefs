@@ -1,16 +1,23 @@
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = 'Bare')]
 param(
     [Parameter(Mandatory)]
     [ValidatePattern('^[^\s:]+$')]
     [string] $WorkstreamId,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory, ParameterSetName = 'Titled')]
     [ValidatePattern('^[^\r\n]+$')]
     [string] $OriginalSessionName,
 
     [ValidateRange(1, [int]::MaxValue)]
     [int] $MaxLength = 40
 )
+
+if ($PSCmdlet.ParameterSetName -eq 'Bare') {
+    if ($WorkstreamId.Length -gt $MaxLength) {
+        throw "Workstream ID '$WorkstreamId' exceeds the session name limit $MaxLength."
+    }
+    return $WorkstreamId
+}
 
 $prefix = "${WorkstreamId}: "
 $available = $MaxLength - $prefix.Length

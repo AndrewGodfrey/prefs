@@ -3,6 +3,14 @@ BeforeAll {
 }
 
 Describe 'Get-WorkstreamSessionName' {
+    It 'uses the bare ID when no original title is supplied' {
+        & $formatter -WorkstreamId '12345-startupPerf' | Should -Be '12345-startupPerf'
+    }
+
+    It 'rejects a bare ID longer than the tool limit' {
+        { & $formatter -WorkstreamId ('a' * 41) -MaxLength 40 } | Should -Throw '*exceeds*'
+    }
+
     It 'prefixes the original title with the supplied bare ID' {
         & $formatter -WorkstreamId '12345' -OriginalSessionName 'Allocation cleanup' |
             Should -Be '12345: Allocation cleanup'
