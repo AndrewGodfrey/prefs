@@ -3,15 +3,9 @@ param($installationTracker)
 function Set-PowerToysEnabledModules([string] $content, [string[]] $keepEnabled, [string] $filename) {
     $json = ConvertFrom-Json $content -AsHashtable
     foreach ($key in @($json.enabled.Keys)) {
-        $range = Find-JsonSection $content @("enabled", $key) $filename
-        if ($null -ne $range) {
-            $line = ((ConvertTo-UnixLineEndings $content) -split "`n")[$range.idxFirst]
-            $newBool = if ($key -in $keepEnabled) { 'true' } else { 'false' }
-            $newLine = $line -replace '\b(true|false)\b', $newBool
-            $content = Format-ReplaceLines $content $range $newLine
-        }
+        $json.enabled[$key] = $key -in $keepEnabled
     }
-    return $content
+    return ConvertTo-Json $json -Depth 100
 }
 
 function New-AppliedLayoutEntry($mon, $layout) {
@@ -64,6 +58,84 @@ function Get-AppliedLayoutsFromEditorParams([hashtable] $editorParams, [hashtabl
     return [ordered]@{ 'applied-layouts' = $entries }
 }
 
+function Invoke-FancyZonesEditorToggle {
+    # Shared with PowerToys' editor hotkey and CLI:
+    # https://github.com/microsoft/PowerToys/blob/main/src/modules/fancyzones/FancyZonesCLI/CommandLine/Commands/OpenEditorCommand.cs
+    $event = [Threading.EventWaitHandle]::OpenExisting('Local\FancyZones-ToggleEditorEvent-1e174338-06a3-472b-874d-073b21c62f14')
+    try {
+        if (!$event.Set()) {
+            throw "Could not signal the FancyZones editor."
+        }
+    } finally {
+        $event.Dispose()
+    }
+}
+
+function Get-FancyZonesEditorParams([string] $editorParamsFile) {
+    if (Get-Process -Name "PowerToys.FancyZonesEditor" -ErrorAction SilentlyContinue) {
+        throw "Close the FancyZones editor before deploying layouts; its current session will not be interrupted."
+    }
+    $previousWrite = if (Test-Path $editorParamsFile) {
+        (Get-Item $editorParamsFile).LastWriteTimeUtc
+    } else {
+        [datetime]::MinValue
+    }
+
+    $editor = $null
+    Invoke-FancyZonesEditorToggle
+    try {
+        for ($attempt = 0; $attempt -lt 40; $attempt++) {
+            $editor = Get-Process -Name "PowerToys.FancyZonesEditor" -ErrorAction SilentlyContinue
+            if ($editor -and (Test-Path $editorParamsFile) -and ((Get-Item $editorParamsFile).LastWriteTimeUtc -gt $previousWrite)) {
+                $editorParams = ConvertFrom-Json (Get-Content -Raw $editorParamsFile) -AsHashtable
+                if (@($editorParams.monitors).Count -eq 0) {
+                    throw "FancyZones refreshed its metadata with no monitors."
+                }
+                return $editorParams
+            }
+            Start-Sleep -Milliseconds 50
+        }
+        throw "FancyZones did not refresh monitor metadata. Enable FancyZones and re-run deploy."
+    } finally {
+        Invoke-FancyZonesEditorToggle
+        if ($editor) {
+            for ($attempt = 0; $attempt -lt 100; $attempt++) {
+                if (!(Get-Process -Id $editor.Id -ErrorAction SilentlyContinue)) { break }
+                Start-Sleep -Milliseconds 50
+            }
+            if ($attempt -eq 100) {
+                throw "The FancyZones editor did not close after refreshing monitor metadata."
+            }
+        }
+    }
+}
+
+function Get-FancyZonesDeploymentLayouts([hashtable] $customLayouts) {
+    foreach ($name in @("fullscreen", "agent")) {
+        $matches = @($customLayouts['custom-layouts'] | Where-Object { $_.name -eq $name })
+        if (($matches.Count -ne 1) -or ($matches[0].type -ne "canvas") -or (@($matches[0].info.zones).Count -eq 0)) {
+            throw "Expected one nonempty canvas layout named '$name'."
+        }
+        @{ uuid = $matches[0].uuid; 'zone-count' = @($matches[0].info.zones).Count }
+    }
+}
+
+function Install-FancyZonesLayouts($stage, [string] $fancyZonesDir) {
+    $editorParams = Get-FancyZonesEditorParams "$fancyZonesDir\editor-parameters.json"
+    $customLayoutsText = Get-Content -Raw "$PSScriptRoot\fancyZones\custom-layouts.json"
+    $layouts = @(Get-FancyZonesDeploymentLayouts (ConvertFrom-Json $customLayoutsText -AsHashtable))
+    Install-JsonToFile $stage "$fancyZonesDir\custom-layouts.json" $customLayoutsText -BackupFile
+
+    $appliedLayoutsFile = "$fancyZonesDir\applied-layouts.json"
+    $existingEntries = @()
+    if (Test-Path $appliedLayoutsFile) {
+        $existing = ConvertFrom-Json (Get-Content -Raw $appliedLayoutsFile) -AsHashtable
+        $existingEntries = @($existing['applied-layouts'])
+    }
+    $appliedLayouts = Get-AppliedLayoutsFromEditorParams $editorParams $layouts $existingEntries
+    Install-JsonToFile $stage $appliedLayoutsFile (ConvertTo-Json $appliedLayouts -Depth 10) -BackupFile
+}
+
 if ($MyInvocation.InvocationName -ne ".") {
     $stage = $installationTracker.StartStage('powerToys-settings')
 
@@ -83,28 +155,6 @@ PowerToys settings file not found. Launch PowerToys once to create it, then re-r
 
     $stage2 = $installationTracker.StartStage('fancyZones-layouts')
     $fancyZonesDir = "$env:LOCALAPPDATA\Microsoft\PowerToys\FancyZones"
-    $editorParamsFile = "$fancyZonesDir\editor-parameters.json"
-
-    if (!(Test-Path $editorParamsFile)) {
-        $stage2.EnsureManualStep("fancyZones/firstRun", @"
-FancyZones editor-parameters.json not found. Open the FancyZones editor (Win + SHIFT + ``) once, then re-run deploy.
-"@)
-    } else {
-        Install-JsonToFile $stage2 "$fancyZonesDir\custom-layouts.json" (Get-Content -Raw "$PSScriptRoot\fancyZones\custom-layouts.json") -BackupFile
-
-        $editorParams = ConvertFrom-Json (Get-Content -Raw $editorParamsFile) -AsHashtable
-        $layouts = @(
-            @{ uuid = '{72207334-72A3-4AB6-83FE-01FEE336F1FA}'; 'zone-count' = 1 },  # fullscreen (left monitor)
-            @{ uuid = '{C00E7BB8-D784-447F-8C0E-B00E3564C6D3}'; 'zone-count' = 3 }   # agent (right monitor)
-        )
-        $appliedLayoutsFile = "$fancyZonesDir\applied-layouts.json"
-        $existingEntries = @()
-        if (Test-Path $appliedLayoutsFile) {
-            $existing = ConvertFrom-Json (Get-Content -Raw $appliedLayoutsFile) -AsHashtable
-            $existingEntries = @($existing['applied-layouts'])
-        }
-        $appliedLayouts = Get-AppliedLayoutsFromEditorParams $editorParams $layouts $existingEntries
-        Install-JsonToFile $stage2 $appliedLayoutsFile (ConvertTo-Json $appliedLayouts -Depth 10) -BackupFile
-    }
+    Install-FancyZonesLayouts $stage2 $fancyZonesDir
     $installationTracker.EndStage($stage2)
 }

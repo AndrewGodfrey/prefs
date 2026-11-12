@@ -1,5 +1,6 @@
 BeforeAll {
     Import-Module "$HOME/prat/lib/TextFileEditor/TextFileEditor.psd1" -Force
+    Import-Module "$HOME/prat/lib/Installers/Installers.psd1" -Force
     . "$PSScriptRoot/powerToys_prefs.ps1"
 }
 
@@ -30,6 +31,33 @@ Describe "Set-PowerToysEnabledModules" {
         $parsed.enabled.ColorPicker | Should -Be $false
     }
 
+    It "enables only the requested module in compact JSON regardless of property order" -TestCases @(
+        @{ enabled = '"FancyZones":false,"AlwaysOnTop":true' }
+        @{ enabled = '"AlwaysOnTop":true,"FancyZones":false' }
+    ) {
+        param($enabled)
+        $json = '{"enabled":{' + $enabled + '}}'
+
+        $result = Set-PowerToysEnabledModules $json @("FancyZones") $script:filename
+
+        $parsed = ConvertFrom-Json $result -AsHashtable
+        $parsed.enabled.FancyZones | Should -Be $true
+        $parsed.enabled.AlwaysOnTop | Should -Be $false
+    }
+
+    It "preserves unrelated values when updating compact JSON" {
+        $json = '{"startup":true,"enabled":{"FancyZones":false,"AlwaysOnTop":true},"show_tray_icon":true,"run_elevated":false,"other":{"text":"true false","items":[1,2]}}'
+
+        $result = Set-PowerToysEnabledModules $json @("FancyZones") $script:filename
+
+        $parsed = ConvertFrom-Json $result -AsHashtable
+        $parsed.startup | Should -Be $true
+        $parsed.show_tray_icon | Should -Be $true
+        $parsed.run_elevated | Should -Be $false
+        $parsed.other.text | Should -BeExactly "true false"
+        $parsed.other.items | Should -Be @(1, 2)
+    }
+
     It "leaves an already-enabled module enabled" {
         $json = "{`n  `"enabled`": {`n    `"FancyZones`": true,`n    `"AlwaysOnTop`": false`n  }`n}"
 
@@ -47,6 +75,143 @@ Describe "Set-PowerToysEnabledModules" {
 
         $result | Should -Match '"FancyZones": true'
         $result | Should -Match '"other": "value"'
+    }
+}
+
+Describe "Get-FancyZonesEditorParams" {
+    BeforeEach {
+        $script:editorParamsFile = Join-Path $TestDrive "editor-parameters.json"
+        '{"monitors":[{"monitor-number":1}]}' | Set-Content $script:editorParamsFile
+        (Get-Item $script:editorParamsFile).LastWriteTimeUtc = [datetime]::UtcNow.AddDays(-1)
+        $script:refreshMonitors = $true
+        $script:editorOpen = $false
+        Mock Invoke-FancyZonesEditorToggle {
+            $script:editorOpen = -not $script:editorOpen
+            if ($script:editorOpen -and $script:refreshMonitors) {
+                '{"monitors":[{"monitor-number":97},{"monitor-number":98}]}' |
+                    Set-Content $script:editorParamsFile
+            }
+        }
+        Mock Get-Process {
+            if ($script:editorOpen) { [pscustomobject]@{ Id = 123 } }
+        }
+        Mock Start-Sleep {}
+    }
+
+    It "requests fresh monitor metadata before reading it" {
+        $result = Get-FancyZonesEditorParams $script:editorParamsFile
+
+        $result.monitors.'monitor-number' | Should -Be @(97, 98)
+        $script:editorOpen | Should -Be $false
+        Should -Invoke Get-Process -Exactly 1 -ParameterFilter { $Id -eq 123 }
+    }
+
+    It "creates the first snapshot without requiring the editor to be opened" {
+        Remove-Item $script:editorParamsFile
+
+        $result = Get-FancyZonesEditorParams $script:editorParamsFile
+
+        $result.monitors.Count | Should -Be 2
+    }
+
+    It "rejects a stale snapshot and closes the editor after a refresh timeout" {
+        $script:refreshMonitors = $false
+
+        { Get-FancyZonesEditorParams $script:editorParamsFile } |
+            Should -Throw "*did not refresh*"
+        $script:editorOpen | Should -Be $false
+    }
+
+    It "leaves an existing editor session untouched" {
+        $script:editorOpen = $true
+
+        { Get-FancyZonesEditorParams $script:editorParamsFile } |
+            Should -Throw "*Close the FancyZones editor*"
+        Should -Invoke Invoke-FancyZonesEditorToggle -Exactly 0
+        $script:editorOpen | Should -Be $true
+    }
+
+    It "accepts an editor that exits before cleanup starts waiting" {
+        Mock Get-Process { $null } -ParameterFilter { $Id -eq 123 }
+
+        $result = Get-FancyZonesEditorParams $script:editorParamsFile
+
+        $result.monitors.Count | Should -Be 2
+        $script:editorOpen | Should -Be $false
+    }
+
+    It "reports an editor that does not exit after the close request" {
+        Mock Get-Process { [pscustomobject]@{ Id = 123 } } -ParameterFilter { $Id -eq 123 }
+
+        { Get-FancyZonesEditorParams $script:editorParamsFile } |
+            Should -Throw "*did not close*"
+    }
+
+    It "rejects refreshed metadata with no monitors" {
+        $script:refreshMonitors = $false
+        Mock Start-Sleep {
+            '{"monitors":[]}' | Set-Content $script:editorParamsFile
+        }
+
+        { Get-FancyZonesEditorParams $script:editorParamsFile } |
+            Should -Throw "*no monitors*"
+        $script:editorOpen | Should -Be $false
+    }
+}
+
+Describe "Get-FancyZonesDeploymentLayouts" {
+    It "derives zone counts and UUIDs from the shipped fullscreen and agent definitions" {
+        $customLayouts = Get-Content -Raw "$PSScriptRoot\fancyZones\custom-layouts.json" |
+            ConvertFrom-Json -AsHashtable
+
+        $layouts = @(Get-FancyZonesDeploymentLayouts $customLayouts)
+
+        $layouts.Count | Should -Be 2
+        $layouts[0].uuid | Should -Be $customLayouts.'custom-layouts'[0].uuid
+        $layouts[0].'zone-count' | Should -Be 1
+        $layouts[1].uuid | Should -Be $customLayouts.'custom-layouts'[1].uuid
+        $layouts[1].'zone-count' | Should -Be 4
+    }
+
+    It "reports a missing layout rather than writing a partial assignment" {
+        { Get-FancyZonesDeploymentLayouts @{ 'custom-layouts' = @() } } |
+            Should -Throw "*fullscreen*"
+    }
+}
+
+Describe "Install-FancyZonesLayouts" {
+    It "replaces obsolete monitor associations using refreshed identities and the shipped zone counts" {
+        $dir = Join-Path $TestDrive "FancyZones"
+        New-Item -ItemType Directory $dir | Out-Null
+        '{"applied-layouts":[{"device":{"monitor-instance":"left","monitor-number":1},"applied-layout":{"uuid":"old"}}]}' |
+            Set-Content (Join-Path $dir "applied-layouts.json")
+        Mock Get-FancyZonesEditorParams {
+            @{
+                monitors = @(
+                    @{ 'monitor' = 'Default_Monitor'; 'monitor-instance-id' = 'left'; 'monitor-number' = 97
+                       'monitor-serial-number' = ''; 'virtual-desktop' = '{VD}'; 'left-coordinate' = 0 },
+                    @{ 'monitor' = 'Default_Monitor'; 'monitor-instance-id' = 'right'; 'monitor-number' = 98
+                       'monitor-serial-number' = ''; 'virtual-desktop' = '{VD}'; 'left-coordinate' = 2560 }
+                )
+            }
+        }
+        Mock Install-JsonToFile {
+            param($stage, $file, $newText)
+            Set-Content $file $newText
+        }
+
+        Install-FancyZonesLayouts "stage" $dir
+
+        $result = Get-Content -Raw (Join-Path $dir "applied-layouts.json") | ConvertFrom-Json -AsHashtable
+        $entries = $result.'applied-layouts'
+        $entries.Count | Should -Be 2
+        $entries.device.'monitor-number' | Should -Be @(97, 98)
+        $entries[0].'applied-layout'.uuid | Should -Be '{72207334-72A3-4AB6-83FE-01FEE336F1FA}'
+        $entries[1].'applied-layout'.uuid | Should -Be '{C00E7BB8-D784-447F-8C0E-B00E3564C6D3}'
+        $entries[1].'applied-layout'.'zone-count' | Should -Be 4
+        Should -Invoke Get-FancyZonesEditorParams -Exactly 1 -ParameterFilter {
+            $editorParamsFile -eq (Join-Path $dir "editor-parameters.json")
+        }
     }
 }
 
