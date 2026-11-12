@@ -6,7 +6,7 @@
 $script:sessionWorkstreamRetentionDays = 30
 $script:sessionWorkstreamMaxLength = 40
 
-# Where every session's id file lives, as an absolute path (prig.ps1 hands it to prig).
+# Where every session's id file lives, as an absolute path.
 function Get-SessionWorkstreamDir {
     [IO.Path]::GetFullPath("$PSScriptRoot/../../auto/sessionWorkstreams")
 }
