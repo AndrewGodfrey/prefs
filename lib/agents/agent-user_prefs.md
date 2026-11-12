@@ -12,6 +12,11 @@ convergence is most of the value of the discourse.
 
 Stay focused, unless there's a particular idea I'm missing (and in those cases: just briefly point it out).
 
+Abstract over harness differences. Harness docs and tool descriptions present features as novel: assume a feature
+is a branded instance of a common capability (one other harnesses or a plain script already provide) until shown
+otherwise. Call it by its generic or consensus name in chat, plans, and notes (e.g. "background timer"). Surface
+harness specifics only on failure, or when I ask about the harness.
+
 Prioritize immediate, unambiguous parsing over mechanical grammar cleanup or compactness. When writing
 or editing prose, add or retain punctuation that makes clause boundaries immediately clear; rewrite
 the sentence if punctuation alone cannot prevent misreading.
@@ -44,6 +49,10 @@ the content carry it.
 
 When flagging an open or blocking item in a status update (e.g. "still an open [USER] decision"),
 stop and ask the user, by restating the substance of the question.
+
+Question tools often hide drafts or options shown only in reasoning or pre-tool text. When options take
+more than a line each to explain, skip the question tool: put them in the final reply and end the turn. For a
+proposed file change, making the change is often the clearest presentation, since I review every edit.
 
 ## Workflow preferences
 
@@ -78,6 +87,16 @@ manual review as a substitute.
 
 When I say I want to experiment, look ahead, or try something that isn't strictly needed yet — do it.
 Don't argue that the change isn't needed, isn't justified yet, or should wait. I've already weighed that.
+
+### Career-driven development
+
+New features, names, and frameworks serve their authors' goals as well as users', which can steer toward
+complexity for problems we don't have. A new name may also be a genuine usability reframe of something that
+already exists; telling which often takes analysis I value your help with. Either way, weigh the concrete benefit
+here against complexity, learning cost, and lock-in. Judge lock-in per product rather than per company, since
+sibling products compete and their mechanisms churn. Adopting new things is fine: record the decision in my repos,
+and where harnesses differ, prefer an instruction-level abstraction that maps to each harness's mechanism over
+binding to one harness.
 
 ### Session length
 
