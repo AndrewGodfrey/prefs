@@ -29,27 +29,7 @@ function Resolve-AgentHarnessDescriptors([object[]] $Contributions, [switch] $Al
 function Get-AgentHarnessContributions([string[]] $HarnessFiles = @(Resolve-PratLibFile 'lib/agents/harnesses.ps1' -ListAll)) {
     $files = @($HarnessFiles)
     [array]::Reverse($files)
-    $contributions = @($files | ForEach-Object { & $_ })
-
-    # A de instance not yet migrated still supplies its selection as a Get-AgentHarnesses command,
-    # whose entries for prefs's built-ins only select them. Read it until that de ships a
-    # harnesses_de.ps1; the warning is what prompts the migration.
-    $legacy = Get-Command Get-AgentHarnesses -ErrorAction Ignore
-    if ($legacy -and -not @($contributions | Where-Object { $_.ContainsKey('selected') })) {
-        Write-Warning "Get-AgentHarnesses ($($legacy.Source)) is the legacy harness registry: move its list into lib/agents/harnesses_<layer>.ps1 (see prefs/lib/agents/agentHarnesses.ps1)."
-        $entries = @(& $legacy)
-        $known   = @($contributions | Where-Object { $_.harnesses } | ForEach-Object { $_.harnesses.Keys })
-        $own     = @{}
-        foreach ($e in $entries) {
-            if ($e.name -notin $known) {
-                $props = @{}
-                foreach ($k in $e.Keys) { if ($k -ne 'name') { $props[$k] = $e[$k] } }
-                $own[$e.name] = $props
-            }
-        }
-        $contributions += @{ selected = @($entries | ForEach-Object { $_.name }); harnesses = $own }
-    }
-    return $contributions
+    return @($files | ForEach-Object { & $_ })
 }
 
 function Get-AgentHarnessDescriptors([switch] $All) {

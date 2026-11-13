@@ -68,41 +68,6 @@ Describe "Get-AgentHarnessContributions" {
 
         @($c.selected) | Should -Be @('lo', 'hi')
     }
-
-    Context "a higher layer still supplying the legacy Get-AgentHarnesses command" {
-        BeforeAll {
-            Set-Content "$testRoot/harnesses_base.ps1" "@{ harnesses = @{ claude = @{ pickerKey = 'C' } } }"
-            function Get-AgentHarnesses { @(@{ name = 'custom'; pickerKey = 'X' }, @{ name = 'claude'; pickerKey = 'Z' }) }
-        }
-
-        It "selects its list, contributing properties only for harnesses no layer file describes" {
-            Mock Write-Warning { }
-
-            $r = @(Resolve-AgentHarnessDescriptors (Get-AgentHarnessContributions -HarnessFiles @("$testRoot/harnesses_base.ps1")))
-
-            @($r.name)     | Should -Be @('custom', 'claude')
-            $r[0].pickerKey | Should -Be 'X'
-            $r[1].pickerKey | Should -Be 'C'
-        }
-
-        It "warns that it needs migrating" {
-            Mock Write-Warning { }
-
-            $null = Get-AgentHarnessContributions -HarnessFiles @("$testRoot/harnesses_base.ps1")
-
-            Should -Invoke Write-Warning -Times 1 -Exactly -ParameterFilter { $Message -match 'harnesses_<layer>\.ps1' }
-        }
-
-        It "is ignored once a layer file declares a selection" {
-            Set-Content "$testRoot/harnesses_top.ps1" "@{ selected = @('claude') }"
-            Mock Write-Warning { }
-
-            $r = @(Resolve-AgentHarnessDescriptors (Get-AgentHarnessContributions -HarnessFiles @("$testRoot/harnesses_top.ps1", "$testRoot/harnesses_base.ps1")))
-
-            @($r.name) | Should -Be @('claude')
-            Should -Invoke Write-Warning -Times 0
-        }
-    }
 }
 
 Describe "Get-CurrentAgentSessionId" {
