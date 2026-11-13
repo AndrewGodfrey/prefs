@@ -144,10 +144,9 @@ configuration; modify those only when I explicitly request it.
 
 Model 1 interruption as ~30 minutes of my work — humans don't context-switch well. Any turn I must
 wait more than ~5 seconds for counts as an interruption. Weigh token costs against human time on
-this scale; both are precious.
-
-Do not assume the first session of the day can absorb maintenance latency. Use explicit refreshes
-for background bookkeeping unless I request an automatic trigger.
+this scale; both are precious. The ~5 seconds is how long I'll wait before switching to other work.
+It's no reason to end a turn early: when the work depends on an external process (an install, a
+build, a deployment), waiting for it costs me nothing extra.
 
 The goal is few, high-value sync points rather than zero interruptions: some turns are worth far
 more than they cost (e.g. my turn after /reflect, which surfaces good and bad ideas from both agent
