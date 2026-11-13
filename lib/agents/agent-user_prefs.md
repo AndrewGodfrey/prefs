@@ -55,6 +55,42 @@ context, so that a fresh agent won't do that again. First consider whether some 
 made more general. If not, adding new context is an acceptable fallback option, but I feel like my instructions
 are far too verbose already, and I'm missing opportunities to 'level them up'."
 
+## Working in the prat ecosystem (prat, prefs, optionally de)
+
+### Layer repos are branched independently — pair them before blaming the code
+
+A tool failing on a missing file in another layer (e.g. `t` reporting `prat/lib/X.ps1` "is not
+recognized") usually means the layer checkouts are on branches that don't match, not that anything
+is broken: a `prefs` branch cut from `main` expects `prat` on `main`. Check `git branch --show-current`
+in each layer first.
+
+### Layer discovery — prefer over hardcoded paths
+
+When writing code in prat or prefs that needs to locate a sibling repo or a repo-specific file,
+use these instead of hardcoding `$home/prefs`, `$home/prat`, etc.:
+
+- `Get-CodebaseLayers` — returns all installed layer descriptors, highest to lowest
+  (`@{Name='de'; Path='C:\...\de'}`, `@{Name='prefs'; ...}`, `@{Name='prat'; ...}`).
+  Use to discover which repos are installed and where:
+  ```powershell
+  $layers    = Get-CodebaseLayers
+  $prefsRoot = ($layers | Where-Object Name -eq 'prefs')?.Path   # $null if not installed
+  $deRoot    = ($layers | Where-Object Name -eq 'de')?.Path      # $null if not installed
+  ```
+
+- `Resolve-PratLibFile 'lib/foo.ps1'` — finds the topmost layer's version of a file, following
+  the `_<layerName>` suffix convention (e.g. `lib/foo_prefs.ps1` shadows `lib/foo_prat.ps1`).
+  Add `-ListAll` to get every installed layer's version, highest first.
+
+Never hardcode `$home/prefs` etc. in prat/prefs/de scripts — those paths are only
+guaranteed by convention, and hardcoding them is a layer violation in spirit even when
+`Find-LayerViolations` doesn't flag the exact string.
+
+### Naming files
+
+When naming files in prefs or de, check for collisions with same-named files in prat — they share an
+ecosystem and a collision causes confusion even if the files are in different directories.
+
 ## Workflow preferences
 
 ### Active plan
