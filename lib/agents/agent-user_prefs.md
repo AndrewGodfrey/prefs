@@ -176,8 +176,13 @@ I will see those.
 This permission does not extend to installed software, global modules, system files, or machine-wide
 configuration; modify those only when I explicitly request it.
 
-Keep behavior-preserving refactoring and behavior changes in separate commits, with the refactoring
-first and the behavior change second.
+Keep behavior-preserving refactoring and behavior changes in separate commits. Usually it's clearer to put
+the refactoring first and the behavior change second. "Behavior" means anything observable, including log output,
+performance, exception types, and operation order (power can fail between any two steps).
+
+There's also a continuum in between - e.g. a refactoring which also makes some limited easily-reviewable behavior
+change - like removing a duplicate log line, or having a negligible effect on performance - is often worth separating
+from more disruptive behavior changes.
 
 When synchronizing a feature branch with its target, never include the merge or rebase in the same
 push as branch changes. Push the branch changes first, then synchronize and push separately so
