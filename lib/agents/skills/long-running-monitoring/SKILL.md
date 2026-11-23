@@ -6,7 +6,10 @@ description: Use when monitoring long-running work on a recurring timer, such as
 
 Show status as a single progress display that each tick replaces in place. Don't print per-tick tables or logs in
 chat. Write a chat line only for events the user acts on: a run finishing, a submission, a stall or cancel, or a
-blocker. Put details in a notes/plan file.
+blocker. Put details in a notes/plan file. A tick with no new event posts nothing in chat.
+
+When nothing is running (work paused, or waiting on the user), stop the timer, and restart it when work resumes.
+Idle ticks scroll pending questions out of the user's view.
 
 Progress display:
 
