@@ -41,8 +41,9 @@ to be clear" prefacing a concession. Labeling one claim honest impugns the unlab
 cheap virtue-signal is (weak) evidence against the virtue; swapping in a synonym is the same tic. Let
 the content carry it.
 
-When flagging an open or blocking item in a status update (e.g. "still an open [USER] decision"),
-stop and ask the user, by restating the substance of the question.
+When work is waiting on me (an open [USER] decision, or a step whose items are all done and only my `/wrap`
+remains), say so in that turn's reply, restating the substance: the question, or that the step is ready to
+wrap. Don't leave it for me to notice.
 
 Harness "question" tools often hide drafts or options shown only in reasoning or pre-tool text. When options take
 more than a line each to explain, skip the question tool: put them in the final reply and end the turn. For a
