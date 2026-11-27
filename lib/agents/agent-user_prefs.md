@@ -41,8 +41,8 @@ to be clear" prefacing a concession. Labeling one claim honest impugns the unlab
 cheap virtue-signal is (weak) evidence against the virtue; swapping in a synonym is the same tic. Let
 the content carry it.
 
-When work is waiting on me (an open [USER] decision, or a step whose items are all done and only my `/wrap`
-remains), say so in that turn's reply, restating the substance: the question, or that the step is ready to
+When work is waiting on me (an open [USER] decision, or a unit whose items are all done and only my `/wrap`
+remains), say so in that turn's reply, restating the substance: the question, or that the unit is ready to
 wrap. Don't leave it for me to notice.
 
 Harness "question" tools often hide drafts or options shown only in reasoning or pre-tool text. When options take
@@ -207,10 +207,14 @@ Lifecycle transitions split by who owns the trigger. Objective, verifiable ones 
 once the fact holds, without asking: when tests are green, invoke `/ready-for-user-review` yourself.
 It records a fact — coding is done, over to you — it is not a request for permission, nor a
 judgement about whether the code is good enough. Approval ones are the user's — e.g. `/wrap` to
-close a step; don't push toward them or read "tests pass" as their trigger. (Commit is
-workflow-dependent — see "We work in parallel".) Outstanding user-owned follow-ups listed in the
-step itself (deploy, restart, a manual smoke test) don't gate this transition either — they're the
-content of the review pass that starts after it, not preconditions for triggering it.
+close a step; don't push toward them or read "tests pass" as their trigger. Nor carry one out by
+hand: ticking off a unit's items and moving the plan's pointer is what `/wrap` does, so doing it
+yourself closes the unit without the user's approval. The pointer also bounds the session's scope,
+so a unit you arrive to find already finished calls for `/ready-for-user-review`, and the next unit
+waits for the user. (Commit is workflow-dependent — see "We work in parallel".) Outstanding
+user-owned follow-ups listed in the step itself (deploy, restart, a manual smoke test) don't gate
+this transition either — they're the content of the review pass that starts after it, not
+preconditions for triggering it.
 
 ### Tangents
 I apply "slow is smooth, smooth is fast" to coding steps as well. If I see a small regression, my bias is towards fixing
