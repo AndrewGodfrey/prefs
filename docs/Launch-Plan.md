@@ -286,7 +286,7 @@ finished several steps. The steps-closed list is derived from the plan's end sta
 One slot, replacing whatever was there; dismissed by the next launch of *any* plan (cleared alongside
 the db-entry launch-count bump, once a row is picked), not by navigating the list or quitting pl.
 `sendRunNotification` fires once for the whole run in its place —
-a headless launch's own per-turn hook (`prigApp.run`) passes no `notify_turn_completed`, so a run
+a headless launch suppresses the harness's own per-turn notification hook, so a run
 doesn't also fire one identical "done" notification per step.
 
 ## Post-exit loop

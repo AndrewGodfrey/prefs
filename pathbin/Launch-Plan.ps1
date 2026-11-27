@@ -860,8 +860,8 @@ function getRunReportLead([string[]] $stepsClosed) {
 }
 
 # One notification for the whole run, in place of the per-step one a headless launch no longer sends
-# (see prigApp.run) — otherwise an unwatched run fires one identical "done" per step, with the actual
-# outcome hidden among them. Absent (same as On-AgentTurnCompleted.ps1's own guard) for non-de users /
+# (the harness suppresses its per-turn hook there) — otherwise an unwatched run fires one identical
+# "done" per step, with the actual outcome hidden among them. Absent (same as On-AgentTurnCompleted.ps1's own guard) for non-de users /
 # machines with no notification command installed.
 function sendRunNotification($report) {
     if (!(Get-Command 'Send-UserNotification' -ErrorAction Ignore)) { return }
